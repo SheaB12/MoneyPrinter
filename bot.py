@@ -1,4 +1,3 @@
-import openai
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
@@ -7,7 +6,6 @@ from trade_executor import place_option_trade
 from gpt_decider import gpt_decision
 from trailing_manager import check_trailing_and_update
 
-openai.api_key = OPENAI_API_KEY
 
 def fetch_intraday_data():
     df = yf.download("SPY", interval="1m", period="1d", progress=False)
