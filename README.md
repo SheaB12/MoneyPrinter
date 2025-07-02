@@ -26,3 +26,18 @@ trades.
 
 The trading logic writes to `trade_log.csv`.  This example project is for
 educational purposes only and **not** financial advice.
+
+## GitHub Actions
+
+An example workflow is provided in `.github/workflows/run-bot.yml` for running
+the bot using GitHub repository secrets. Define the following secrets in your
+repository settings so the workflow can authenticate:
+
+```
+TRADIER_TOKEN
+TRADIER_ACCOUNT_ID
+OPENAI_API_KEY
+```
+
+Trigger the workflow manually from the Actions tab to execute the bot with
+these credentials.
