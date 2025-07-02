@@ -1,0 +1,7 @@
+openai
+flask
+pandas
+yfinance
+requests
+schedule
+openai
