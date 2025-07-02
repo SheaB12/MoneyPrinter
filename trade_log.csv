@@ -1,0 +1,2 @@
+Date,Direction,Option,Entry Price,Exit Price,PnL,Source,Time Held,Stop Hit,Profit Target Hit,Confidence,Reason,Stop %,Target %
+2025-07-02 12:37:58,call,SPY_FAKE_OPTION,1.0,1.02,0.04,GPT,5 min,NO,YES,70,Overall uptrend in the last 30 minutes,1,2
