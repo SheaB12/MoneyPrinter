@@ -1,3 +1,30 @@
-TRADIER_TOKEN = "kPaGEprBDXhzidWL3t1AqzkBcaSX"
-ACCOUNT_ID = "VA73458727"
-OPENAI_API_KEY = "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"
+"""API credential configuration.
+
+Credentials are loaded from environment variables so secrets are not stored
+in the repository. Ensure the following variables are set before running the
+application:
+
+```
+TRADIER_TOKEN         - Tradier API token
+TRADIER_ACCOUNT_ID    - Tradier account ID
+OPENAI_API_KEY        - OpenAI API key
+```
+"""
+
+import os
+
+TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
+ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+missing = [name for name, val in {
+    "TRADIER_TOKEN": TRADIER_TOKEN,
+    "TRADIER_ACCOUNT_ID": ACCOUNT_ID,
+    "OPENAI_API_KEY": OPENAI_API_KEY,
+}.items() if not val]
+
+if missing:
+    raise EnvironmentError(
+        f"Missing required environment variables: {', '.join(missing)}"
+    )
+

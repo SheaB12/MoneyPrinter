@@ -10,7 +10,11 @@ trades.
    ```bash
    pip install -r requirements.txt
    ```
-2. Set your API keys in `config.py` (OpenAI and Tradier).
+2. Set the required environment variables.  You can copy `.env.example` to
+   `.env` and fill in your credentials or export them in your shell:
+   - `TRADIER_TOKEN`
+   - `TRADIER_ACCOUNT_ID`
+   - `OPENAI_API_KEY`
 3. Run the bot:
    ```bash
    python bot.py
