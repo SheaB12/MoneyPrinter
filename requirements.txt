@@ -4,4 +4,3 @@ pandas
 yfinance
 requests
 schedule
-openai

@@ -2,7 +2,8 @@ import openai
 import json
 from config import OPENAI_API_KEY
 
-openai.api_key = OPENAI_API_KEY
+# Use the newer OpenAI client interface
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 def gpt_decision(df):
     candles = df.tail(30)
@@ -32,12 +33,12 @@ def gpt_decision(df):
     )
 
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
-        reply = response['choices'][0]['message']['content']
+        reply = response.choices[0].message.content
         data = json.loads(reply)
 
         return (
