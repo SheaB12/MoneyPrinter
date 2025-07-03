@@ -228,6 +228,9 @@ def test_strikes():
 def run_bot():
     print("📈 Downloading SPY data...")
     df = yf.download("SPY", interval="1m", period="1d", progress=False, auto_adjust=True)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        df.columns.name = None
     if df.empty:
         print("❌ No SPY data retrieved.")
         return
