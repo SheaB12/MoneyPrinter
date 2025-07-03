@@ -4,9 +4,12 @@ import datetime
 import requests
 import pandas as pd
 import yfinance as yf
-import openai
-from flask import Flask, render_template_string
+from flask import Flask
 from dotenv import load_dotenv
+try:
+    import openai
+except Exception:  # pragma: no cover - openai may not be installed
+    openai = None
 
 # === Configuration ===
 load_dotenv()
@@ -14,16 +17,19 @@ TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
 ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not all([TRADIER_TOKEN, ACCOUNT_ID, OPENAI_API_KEY]):
-    raise EnvironmentError("Missing required environment variables")
-
-openai.api_key = OPENAI_API_KEY
+OFFLINE_ENV = os.getenv("OFFLINE", "0") == "1"
+OFFLINE = OFFLINE_ENV or not all([TRADIER_TOKEN, ACCOUNT_ID, OPENAI_API_KEY]) or openai is None
+if not OFFLINE and openai is not None:
+    openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 TRADIER_BASE_URL = "https://sandbox.tradier.com/v1"
-HEADERS = {
-    "Authorization": f"Bearer {TRADIER_TOKEN}",
-    "Accept": "application/json",
-    "Content-Type": "application/x-www-form-urlencoded",
-}
+if OFFLINE:
+    HEADERS = {}
+else:
+    HEADERS = {
+        "Authorization": f"Bearer {TRADIER_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
 
 LOG_FILE = "trade_log.csv"
 
@@ -37,6 +43,13 @@ def get_next_friday():
     return (today + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
 def get_spy_price():
+    if OFFLINE:
+        data = yf.download(
+            "SPY", interval="1m", period="1d", progress=False, auto_adjust=True
+        )
+        if not data.empty:
+            return float(data["Close"].iloc[-1])
+        raise RuntimeError("Unable to fetch SPY price in offline mode")
     url = f"{TRADIER_BASE_URL}/markets/quotes"
     params = {"symbols": "SPY"}
     r = requests.get(url, headers=HEADERS, params=params)
@@ -49,6 +62,8 @@ def get_option_symbol(direction: str, strike: int) -> str:
     return f"SPY{expiry}{right}{strike_formatted}"
 
 def validate_option_symbol(symbol: str) -> bool:
+    if OFFLINE:
+        return True
     url = f"{TRADIER_BASE_URL}/markets/options/lookup"
     r = requests.get(url, headers=HEADERS, params={"symbol": symbol})
     if r.status_code != 200:
@@ -71,6 +86,9 @@ def place_option_trade(direction: str, strike_type: str = "ATM"):
         symbol = get_option_symbol(direction, strike)
         if not validate_option_symbol(symbol):
             return {"status": "error", "error": f"Invalid option {symbol}"}
+        if OFFLINE:
+            print(f"[DRY RUN] Would place {direction} trade for {symbol}")
+            return {"status": "success", "symbol": symbol, "underlying_price": price}
         payload = {
             "class": "option",
             "symbol": symbol,
@@ -94,19 +112,30 @@ def gpt_trade_decision(df: pd.DataFrame) -> dict:
     last_5 = df.tail(5)
     if last_5.empty:
         return {"decision": "NOTHING", "confidence": 0, "strike_type": "ATM", "reason": "Not enough data"}
+    if OFFLINE or openai is None:
+        diff = last_5["Close"].iloc[-1] - last_5["Open"].iloc[0]
+        if abs(diff) < 0.05:
+            return {"decision": "NOTHING", "confidence": 50, "strike_type": "ATM", "reason": "Small movement"}
+        decision = "CALL" if diff > 0 else "PUT"
+        confidence = min(int(abs(diff) * 10), 100)
+        return {"decision": decision, "confidence": confidence, "strike_type": "ATM", "reason": "Heuristic"}
+
     prompt = "You're a disciplined SPY options trader. Based on the last 5 minutes of 1-minute candles, should we buy a CALL, PUT, or NOTHING?\n"
     for i, row in last_5.iterrows():
         t = i.strftime('%H:%M')
         prompt += f"{t} - O={row['Open']:.2f}, H={row['High']:.2f}, L={row['Low']:.2f}, C={row['Close']:.2f}, V={int(row['Volume'])}\n"
     prompt += "\nRespond with: CALL, PUT, or NOTHING. Then give a 1-line reason and confidence (0-100). Also suggest: ATM, ITM, or OTM strike."
     try:
-        response = openai.ChatCompletion.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "You're a disciplined SPY options scalper."}, {"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You're a disciplined SPY options scalper."},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.3,
             max_tokens=150,
         )
-        text = response.choices[0].message["content"].strip().upper()
+        text = response.choices[0].message.content.strip().upper()
         decision = "NOTHING"
         confidence = 0
         strike_type = "ATM"
