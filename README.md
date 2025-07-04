@@ -41,3 +41,6 @@ OPENAI_API_KEY
 
 Trigger the workflow manually from the Actions tab to execute the bot with
 these credentials.
+
+A second workflow located at `.github/workflows/run-monolith.yml` runs
+`monolith.py` every day at **8:45 AM UTC** using the same secrets.
