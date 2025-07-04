@@ -35,18 +35,27 @@ LOG_FILE = "trade_log.csv"
 
 # === Helpers ===
 
-def send_discord_message(message: str):
+def send_discord_embed(title: str, description: str, color: int = 0x5865F2, fields: list = None):
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ No Discord webhook URL found.")
         return
+    embed = {
+        "title": title,
+        "description": description,
+        "color": color,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "footer": {"text": "Money Printer Bot"},
+    }
+    if fields:
+        embed["fields"] = fields
     try:
         requests.post(
             DISCORD_WEBHOOK_URL,
-            json={"content": message},
+            json={"embeds": [embed]},
             headers={"Content-Type": "application/json"},
         )
     except Exception as e:
-        print(f"❌ Failed to send Discord message: {e}")
+        print(f"❌ Failed to send Discord embed: {e}")
 
 def get_next_friday():
     today = datetime.date.today()
@@ -62,7 +71,8 @@ def get_spy_price():
             return float(data["Close"].iloc[-1])
         raise RuntimeError("Unable to fetch SPY price in offline mode")
     url = f"{TRADIER_BASE_URL}/markets/quotes"
-    r = requests.get(url, headers=HEADERS, params={"symbols": "SPY"})
+    params = {"symbols": "SPY"}
+    r = requests.get(url, headers=HEADERS, params=params)
     return float(r.json()["quotes"]["quote"]["last"])
 
 def get_option_symbol(direction: str, strike: int) -> str:
@@ -175,7 +185,7 @@ def run_bot():
     if df.empty:
         msg = "❌ No SPY data retrieved."
         print(msg)
-        send_discord_message(msg)
+        send_discord_embed("❌ Data Fetch Error", msg, color=0xFF0000)
         return
 
     print("🧠 Running GPT decision logic...")
@@ -183,20 +193,37 @@ def run_bot():
     if result["decision"] == "NOTHING" or result.get("confidence", 0) < 50:
         msg = f"⚠️ SKIPPED: Confidence {result.get('confidence', 0)}% | Reason: {result.get('reason', 'Low confidence')}"
         print(msg)
-        send_discord_message(msg)
+        send_discord_embed("⚠️ Trade Skipped", msg, color=0xFFA500)
         return
 
-    msg = f"✅ Decision: {result['decision']} | Strike: {result['strike_type']} | Confidence: {result['confidence']}%"
-    print(msg)
-    send_discord_message(msg)
+    print(f"✅ Decision: {result['decision']} | Strike: {result['strike_type']} | Confidence: {result['confidence']}%")
+    send_discord_embed(
+        "✅ Trade Decision Made",
+        "GPT has chosen a trade setup.",
+        color=0x2ECC71,
+        fields=[
+            {"name": "Direction", "value": result["decision"], "inline": True},
+            {"name": "Strike Type", "value": result["strike_type"], "inline": True},
+            {"name": "Confidence", "value": f"{result['confidence']}%", "inline": True},
+        ],
+    )
 
     trade = place_option_trade(result["decision"], result["strike_type"])
     if trade["status"] == "success":
-        msg = f"📤 ORDER PLACED: {trade['symbol']} at ${trade['underlying_price']:.2f}"
+        print(f"📤 ORDER PLACED: {trade['symbol']} at ${trade['underlying_price']:.2f}")
+        send_discord_embed(
+            "📤 Trade Executed",
+            "Order successfully placed.",
+            color=0x2ECC71,
+            fields=[
+                {"name": "Symbol", "value": trade["symbol"], "inline": False},
+                {"name": "Entry Price", "value": f"${trade['underlying_price']:.2f}", "inline": True},
+            ],
+        )
     else:
         msg = f"❌ ORDER FAILED: {trade.get('error', 'Unknown error')}"
-    print(msg)
-    send_discord_message(msg)
+        print(msg)
+        send_discord_embed("❌ Trade Failed", msg, color=0xFF0000)
 
 # === CLI ===
 
