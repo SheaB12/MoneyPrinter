@@ -6,9 +6,10 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask
 from dotenv import load_dotenv
+
 try:
     import openai
-except Exception:  # pragma: no cover - openai may not be installed
+except Exception:
     openai = None
 
 # === Configuration ===
@@ -16,24 +17,36 @@ load_dotenv()
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
 ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 OFFLINE_ENV = os.getenv("OFFLINE", "0") == "1"
 OFFLINE = OFFLINE_ENV or not all([TRADIER_TOKEN, ACCOUNT_ID, OPENAI_API_KEY]) or openai is None
 if not OFFLINE and openai is not None:
     openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
 TRADIER_BASE_URL = "https://sandbox.tradier.com/v1"
-if OFFLINE:
-    HEADERS = {}
-else:
-    HEADERS = {
-        "Authorization": f"Bearer {TRADIER_TOKEN}",
-        "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
+HEADERS = {
+    "Authorization": f"Bearer {TRADIER_TOKEN}",
+    "Accept": "application/json",
+    "Content-Type": "application/x-www-form-urlencoded",
+} if not OFFLINE else {}
 
 LOG_FILE = "trade_log.csv"
 
 # === Helpers ===
+
+def send_discord_message(message: str):
+    if not DISCORD_WEBHOOK_URL:
+        print("⚠️ No Discord webhook URL found.")
+        return
+    try:
+        requests.post(
+            DISCORD_WEBHOOK_URL,
+            json={"content": message},
+            headers={"Content-Type": "application/json"},
+        )
+    except Exception as e:
+        print(f"❌ Failed to send Discord message: {e}")
 
 def get_next_friday():
     today = datetime.date.today()
@@ -44,15 +57,12 @@ def get_next_friday():
 
 def get_spy_price():
     if OFFLINE:
-        data = yf.download(
-            "SPY", interval="1m", period="1d", progress=False, auto_adjust=True
-        )
+        data = yf.download("SPY", interval="1m", period="1d", progress=False, auto_adjust=True)
         if not data.empty:
             return float(data["Close"].iloc[-1])
         raise RuntimeError("Unable to fetch SPY price in offline mode")
     url = f"{TRADIER_BASE_URL}/markets/quotes"
-    params = {"symbols": "SPY"}
-    r = requests.get(url, headers=HEADERS, params=params)
+    r = requests.get(url, headers=HEADERS, params={"symbols": "SPY"})
     return float(r.json()["quotes"]["quote"]["last"])
 
 def get_option_symbol(direction: str, strike: int) -> str:
@@ -154,104 +164,6 @@ def gpt_trade_decision(df: pd.DataFrame) -> dict:
     except Exception as e:
         return {"decision": "NOTHING", "confidence": 0, "strike_type": "ATM", "reason": str(e)}
 
-# === Trade Logging ===
-
-def log_header():
-    if not os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "Date", "Direction", "Option", "Entry Price", "Exit Price", "PnL", "Source", "Time Held", "Stop Hit", "Profit Target Hit", "Confidence", "Reason", "Stop %", "Target %",
-            ])
-
-def log_trade(row):
-    with open(LOG_FILE, "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(row)
-
-# === Trailing Manager ===
-
-def check_trailing_and_update():
-    try:
-        df = pd.read_csv(LOG_FILE)
-        open_trades = df[df["Status"] == "OPEN"]
-        if open_trades.empty:
-            print("📭 No open trades to monitor.")
-            return
-        current_price = get_spy_price()
-        for idx, row in open_trades.iterrows():
-            direction = row["Direction"].lower()
-            entry = float(row["EntryPrice"])
-            stop_pct = float(row["StopLoss%"]) / 100
-            target_pct = float(row["Target%"]) / 100
-            gain = (current_price - entry) / entry if direction == "call" else (entry - current_price) / entry
-            pnl_percent = round(gain * 100, 2)
-            if gain <= -stop_pct:
-                df.at[idx, "Status"] = "CLOSED"
-                df.at[idx, "PnL"] = pnl_percent
-                print(f"🛑 STOP HIT: {direction.upper()} closed at {pnl_percent}%")
-            elif gain >= target_pct:
-                df.at[idx, "Status"] = "CLOSED"
-                df.at[idx, "PnL"] = pnl_percent
-                print(f"🎯 TARGET HIT: {direction.upper()} closed at {pnl_percent}%")
-            else:
-                df.at[idx, "PnL"] = pnl_percent
-        df.to_csv(LOG_FILE, index=False)
-    except Exception as e:
-        print(f"❌ Trailing stop logic error: {e}")
-
-# === Dashboard ===
-app = Flask(__name__)
-
-@app.route("/")
-def dashboard():
-    try:
-        df = pd.read_csv(LOG_FILE)
-        last_trades = df.tail(10).to_html(classes="data", border=1, index=False)
-        total_pnl = df["PnL"].sum()
-        win_rate = (df["PnL"] > 0).mean() * 100 if len(df) > 0 else 0
-        avg_gain = df["PnL"].mean() if len(df) > 0 else 0
-        open_trades = df[df["Status"] == "OPEN"]
-        open_pnl = open_trades["PnL"].sum() if not open_trades.empty else 0
-    except Exception as e:
-        last_trades = f"<p>No trades found or error reading file: {e}</p>"
-        total_pnl = win_rate = avg_gain = open_pnl = 0
-    html = f"""
-    <html>
-    <head>
-        <title>Money Printer Dashboard</title>
-    </head>
-    <body>
-        <h1>💰 Money Printer Dashboard</h1>
-        <p><strong>Total Realized PnL:</strong> ${total_pnl:.2f}</p>
-        <p><strong>Live Open PnL:</strong> ${open_pnl:.2f}</p>
-        <p><strong>Win Rate:</strong> {win_rate:.2f}%</p>
-        <p><strong>Average Gain/Loss:</strong> {avg_gain:.4f}</p>
-        <h3>Recent Trades:</h3>
-        {last_trades}
-    </body>
-    </html>
-    """
-    return html
-
-# === Strike Tester ===
-
-def test_strikes():
-    expiry = get_next_friday()
-    try:
-        spy_price = get_spy_price()
-    except Exception:
-        spy_price = 545
-    for direction in ["call", "put"]:
-        print(f"\nTesting {direction.upper()}S:")
-        for strike in range(int(spy_price) - 15, int(spy_price) + 16, 5):
-            symbol = get_option_symbol(direction, strike)
-            valid = validate_option_symbol(symbol)
-            if valid:
-                print(f"✅ VALID: {symbol}")
-            else:
-                print(f"❌ INVALID: {symbol}")
-
 # === Main Bot ===
 
 def run_bot():
@@ -261,21 +173,33 @@ def run_bot():
         df.columns = df.columns.get_level_values(0)
         df.columns.name = None
     if df.empty:
-        print("❌ No SPY data retrieved.")
+        msg = "❌ No SPY data retrieved."
+        print(msg)
+        send_discord_message(msg)
         return
+
     print("🧠 Running GPT decision logic...")
     result = gpt_trade_decision(df)
     if result["decision"] == "NOTHING" or result.get("confidence", 0) < 50:
-        print(f"⚠️ SKIP: Confidence {result.get('confidence', 0)}% | Reason: {result.get('reason', 'Low confidence')}")
+        msg = f"⚠️ SKIPPED: Confidence {result.get('confidence', 0)}% | Reason: {result.get('reason', 'Low confidence')}"
+        print(msg)
+        send_discord_message(msg)
         return
-    print(f"✅ Decision: {result['decision']} | Strike: {result['strike_type']} | Confidence: {result['confidence']}%")
+
+    msg = f"✅ Decision: {result['decision']} | Strike: {result['strike_type']} | Confidence: {result['confidence']}%"
+    print(msg)
+    send_discord_message(msg)
+
     trade = place_option_trade(result["decision"], result["strike_type"])
     if trade["status"] == "success":
-        print(f"📤 ORDER PLACED: {trade['symbol']} at ${trade['underlying_price']:.2f}")
+        msg = f"📤 ORDER PLACED: {trade['symbol']} at ${trade['underlying_price']:.2f}"
     else:
-        print(f"❌ ORDER FAILED: {trade.get('error', 'Unknown error')}")
+        msg = f"❌ ORDER FAILED: {trade.get('error', 'Unknown error')}"
+    print(msg)
+    send_discord_message(msg)
 
 # === CLI ===
+
 if __name__ == "__main__":
     import argparse
 
@@ -291,4 +215,3 @@ if __name__ == "__main__":
         check_trailing_and_update()
     elif args.command == "test-strikes":
         test_strikes()
-
