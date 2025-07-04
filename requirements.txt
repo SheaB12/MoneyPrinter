@@ -4,3 +4,4 @@ pandas
 yfinance
 requests
 schedule
+python-dotenv

@@ -6,11 +6,13 @@ import datetime
 from dotenv import load_dotenv
 from config import TRADIER_TOKEN, ACCOUNT_ID, OPENAI_API_KEY
 import openai
+
+# Initialize OpenAI client using the newer 1.x interface
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 import pandas as pd
 
 # Load environment variables
 load_dotenv()
-openai.api_key = OPENAI_API_KEY
 
 TICKER = "SPY"
 MODE = os.getenv("MODE", "paper")
@@ -158,7 +160,7 @@ def gpt_trade_decision(df: pd.DataFrame):
 
         prompt += "\nRespond with: CALL, PUT, or NOTHING. Then give a 1-line reason and confidence (0–100). Also suggest: ATM, ITM, or OTM strike."
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "You're a disciplined SPY options scalper."},
@@ -168,7 +170,7 @@ def gpt_trade_decision(df: pd.DataFrame):
             max_tokens=150
         )
 
-        text = response.choices[0].message["content"].strip().upper()
+        text = response.choices[0].message.content.strip().upper()
         print("🧠 GPT Output:\n", text)
 
         decision = "NOTHING"
