@@ -1,17 +1,19 @@
-name: Money Printer Bot
+name: Money Printer Daily Bot
 
 on:
   schedule:
-    - cron: "45 13 * * 1-5"   # 8:45 AM ET Monday–Friday
-    - cron: "30 14 * * 1-5"   # 9:30 AM ET
-    - cron: "30 16 * * 1-5"   # 11:30 AM ET
-    - cron: "30 19 * * 1-5"   # 3:30 PM ET
-    - cron: "0 13 * * 0"      # 8:00 AM ET Sunday (weekly summary)
+    # Daily runs at 8:30 AM, 9:30 AM, 11:30 AM, and 3:30 PM ET (convert to UTC)
+    - cron: "30 12 * * 1-5"   # 8:30 AM ET
+    - cron: "30 13 * * 1-5"   # 9:30 AM ET
+    - cron: "30 15 * * 1-5"   # 11:30 AM ET
+    - cron: "30 18 * * 1-5"   # 2:30 PM ET
+    # Daily performance summary run at 4:15 PM ET (after market close)
+    - cron: "15 20 * * 1-5"   # 4:15 PM ET
   workflow_dispatch:
 
 jobs:
-  run-monolith:
-    if: github.event.schedule != '0 13 * * 0'
+  trade-bot:
+    if: github.event.schedule != '15 20 * * 1-5'  # Skip this job if it's the summary run
     runs-on: ubuntu-latest
     env:
       TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
@@ -26,15 +28,14 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Trading Bot
+      - name: Run Monolith (Trade Mode)
         run: python monolith.py run
 
-  weekly-summary:
-    if: github.event.schedule == '0 13 * * 0'
+  summary-bot:
+    if: github.event.schedule == '15 20 * * 1-5'  # Only run this job at 4:15 PM ET
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      OFFLINE: "0"
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -42,5 +43,5 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Send Weekly Summary
-        run: python monolith.py summary
+      - name: Send Daily Summary
+        run: python monolith.py weekly
