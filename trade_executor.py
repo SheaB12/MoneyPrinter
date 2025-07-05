@@ -62,14 +62,13 @@ def find_option_symbol_from_chain(direction):
             raise Exception("No option chains returned")
 
         direction = direction.upper()
-        sorted_options = sorted(
-            [o for o in options if o["option_type"] == direction],
-            key=lambda x: abs(x["strike"] - 450)
-        )
-        if not sorted_options:
-            raise Exception(f"No {direction} options found near $450 for expiration {expiration}")
-        best_option = sorted_options[0]
-        print(f"Selected valid option symbol: {best_option['symbol']} for {expiration}")
+        filtered = [o for o in options if o["option_type"] == direction]
+
+        if not filtered:
+            raise Exception(f"No {direction} options found for expiration {expiration}")
+
+        best_option = filtered[0]
+        print(f"Selected {direction} option: {best_option['symbol']}")
         return best_option["symbol"]
     except Exception as e:
         print(f"Error fetching option chain: {e}")
