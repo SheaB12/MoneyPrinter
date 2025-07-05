@@ -31,8 +31,6 @@ HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 } if not OFFLINE else {}
 
-LOG_FILE = "trade_log.csv"
-
 # === Discord Alerts ===
 
 def send_discord_embed(title: str, description: str, color: int = 0x5865F2, fields: list = None):
@@ -83,11 +81,7 @@ def get_valid_option_symbol(direction: str, strike_type: str = "ATM") -> tuple:
 
     expiry = get_next_friday()
     url = f"{TRADIER_BASE_URL}/markets/options/chains"
-    params = {
-        "symbol": "SPY",
-        "expiration": expiry,
-        "greeks": "false"
-    }
+    params = {"symbol": "SPY", "expiration": expiry, "greeks": "false"}
     response = requests.get(url, headers=HEADERS, params=params)
     if response.status_code != 200:
         raise RuntimeError("Failed to fetch options chain")
@@ -100,12 +94,10 @@ def get_valid_option_symbol(direction: str, strike_type: str = "ATM") -> tuple:
     current_price = get_spy_price()
     right = "call" if direction.lower() == "call" else "put"
     filtered = [opt for opt in options if opt["option_type"] == right]
-
     if not filtered:
         raise RuntimeError(f"No {right.upper()} options found for SPY")
 
     sorted_opts = sorted(filtered, key=lambda x: abs(x["strike"] - current_price))
-
     if strike_type == "ATM":
         selected = sorted_opts[0]
     elif strike_type == "ITM":
@@ -125,6 +117,8 @@ def place_option_trade(direction: str, strike_type: str = "ATM"):
     try:
         symbol, strike = get_valid_option_symbol(direction, strike_type)
         price = get_spy_price()
+
+        print(f"🔎 Attempting to trade symbol: {symbol}")  # Debug line
 
         if OFFLINE:
             print(f"[DRY RUN] Would place {direction} trade for {symbol}")
