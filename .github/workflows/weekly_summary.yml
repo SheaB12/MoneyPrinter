@@ -1,0 +1,27 @@
+name: Weekly Performance Summary
+
+on:
+  schedule:
+    - cron: "0 13 * * 0"  # Runs every Sunday at 8:00 AM ET
+  workflow_dispatch:
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      OFFLINE: "0"
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weekly summary
+        run: python monolith.py summary
