@@ -140,10 +140,14 @@ def place_option_trade(direction: str, strike_type: str = "ATM"):
         }
         url = f"{TRADIER_BASE_URL}/accounts/{ACCOUNT_ID}/orders"
         resp = requests.post(url, headers=HEADERS, data=payload)
+
         try:
             data = resp.json()
         except Exception:
-            return {"status": "error", "error": "Invalid JSON from Tradier"}
+            return {
+                "status": "error",
+                "error": f"Invalid JSON from Tradier. Raw response: {resp.text[:300]}"
+            }
 
         if "order" in data:
             return {"status": "success", "symbol": symbol, "underlying_price": price}
