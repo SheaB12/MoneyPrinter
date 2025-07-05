@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from logger import log_trade_to_sheets
 from discord_alerts import send_discord_alert
 
-TRADIER_API_URL = "https://api.tradier.com/v1"
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
 ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
 IS_SANDBOX = True
@@ -16,7 +15,7 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-BASE_URL = "https://sandbox.tradier.com/v1" if IS_SANDBOX else TRADIER_API_URL
+BASE_URL = "https://sandbox.tradier.com/v1" if IS_SANDBOX else "https://api.tradier.com/v1"
 TRADE_STATE_FILE = "trade_state.json"
 
 
@@ -39,8 +38,7 @@ def get_spy_option_strike(direction):
 
 def find_option_symbol(expiration, strike, direction):
     option_type = "C" if direction == "CALL" else "P"
-    root = "SPY"
-    return f"{root}{expiration.strftime('%y%m%d')}{option_type}{int(strike):05d}"
+    return f"SPY{expiration.strftime('%y%m%d')}{option_type}{int(strike):05d}"
 
 
 def place_order(option_symbol, quantity):
@@ -53,8 +51,20 @@ def place_order(option_symbol, quantity):
         "type": "market",
         "duration": "day"
     }
-    response = requests.post(url, headers=HEADERS, data=payload)
-    return response.json()
+    try:
+        response = requests.post(url, headers=HEADERS, data=payload)
+        print("Raw response:", response.text)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP Error: {http_err}")
+        raise
+    except requests.exceptions.RequestException as req_err:
+        print(f"Request Error: {req_err}")
+        raise
+    except json.JSONDecodeError:
+        print("Tradier API did not return valid JSON.")
+        raise
 
 
 def get_option_price(symbol):
@@ -135,7 +145,6 @@ def execute_trade():
     entry_price = get_option_price(option_symbol)
     print(f"Entry price: {entry_price:.2f}")
 
-    # Discord alert: Trade placed
     send_discord_alert(
         title="📈 Trade Executed",
         description=f"Placed SPY {direction} – {option_symbol} (2 contracts)\nEntry: ${entry_price:.2f}"
@@ -155,7 +164,6 @@ def execute_trade():
         "signal_reason": "Time-based entry (demo)"
     })
 
-    # Discord alert: Trade closed
     send_discord_alert(
         title="✅ Trade Closed",
         description=f"Exit: ${result['exit_price']:.2f}\n"
