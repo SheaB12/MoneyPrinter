@@ -75,40 +75,57 @@ def get_spy_price():
     r = requests.get(url, headers=HEADERS, params=params)
     return float(r.json()["quotes"]["quote"]["last"])
 
-def get_option_symbol(direction: str, strike: int) -> str:
-    expiry = get_next_friday().replace("-", "")
-    strike_formatted = f"{int(strike * 1000):08d}"
-    right = "C" if direction.lower() == "call" else "P"
-    return f"SPY{expiry}{right}{strike_formatted}"
-
-def validate_option_symbol(symbol: str) -> bool:
+def get_valid_option_symbol(direction: str, strike_type: str = "ATM") -> tuple:
     if OFFLINE:
-        return True
-    url = f"{TRADIER_BASE_URL}/markets/options/lookup"
-    r = requests.get(url, headers=HEADERS, params={"symbol": symbol})
-    if r.status_code != 200:
-        return False
-    try:
-        data = r.json()
-        return bool(data.get("options"))
-    except Exception:
-        return False
+        return "SPY_FAKE_OPTION", 500.00
+
+    expiry = get_next_friday()
+    url = f"{TRADIER_BASE_URL}/markets/options/chains"
+    params = {
+        "symbol": "SPY",
+        "expiration": expiry,
+        "greeks": "false"
+    }
+    response = requests.get(url, headers=HEADERS, params=params)
+    if response.status_code != 200:
+        raise RuntimeError("Failed to fetch options chain")
+
+    data = response.json()
+    options = data.get("options", {}).get("option", [])
+    if not options:
+        raise RuntimeError("No options returned from Tradier")
+
+    current_price = get_spy_price()
+    right = "call" if direction.lower() == "call" else "put"
+    filtered = [opt for opt in options if opt["option_type"] == right]
+
+    if not filtered:
+        raise RuntimeError(f"No {right.upper()} options found for SPY")
+
+    sorted_opts = sorted(filtered, key=lambda x: abs(x["strike"] - current_price))
+
+    if strike_type == "ATM":
+        selected = sorted_opts[0]
+    elif strike_type == "ITM":
+        selected = next((o for o in sorted_opts if
+                         (o["strike"] < current_price if right == "call" else o["strike"] > current_price)), sorted_opts[0])
+    elif strike_type == "OTM":
+        selected = next((o for o in sorted_opts if
+                         (o["strike"] > current_price if right == "call" else o["strike"] < current_price)), sorted_opts[0])
+    else:
+        selected = sorted_opts[0]
+
+    return selected["symbol"], selected["strike"]
 
 def place_option_trade(direction: str, strike_type: str = "ATM"):
     try:
+        symbol, strike = get_valid_option_symbol(direction, strike_type)
         price = get_spy_price()
-        if strike_type == "ITM":
-            strike = round(price - 5)
-        elif strike_type == "OTM":
-            strike = round(price + 5)
-        else:
-            strike = round(price)
-        symbol = get_option_symbol(direction, strike)
-        if not validate_option_symbol(symbol):
-            return {"status": "error", "error": f"Invalid option {symbol}"}
+
         if OFFLINE:
             print(f"[DRY RUN] Would place {direction} trade for {symbol}")
             return {"status": "success", "symbol": symbol, "underlying_price": price}
+
         payload = {
             "class": "option",
             "symbol": symbol,
