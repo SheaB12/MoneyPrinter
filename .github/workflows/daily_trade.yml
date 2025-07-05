@@ -2,8 +2,8 @@ name: Daily SPY Option Trade
 
 on:
   schedule:
-    - cron: '35 13 * * 1-5'  # 9:35 AM EST (13:35 UTC) Monday–Friday
-  workflow_dispatch:  # Allow manual trigger from GitHub
+    - cron: '35 13 * * 1-5'  # 9:35 AM EST
+  workflow_dispatch:  # Manual trigger for testing
 
 jobs:
   daily-trade:
@@ -19,14 +19,14 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
-          python-version: 3.10  # ✅ Correct
+          python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install requests gspread google-auth
 
       - name: Run SPY Trade Bot
