@@ -1,27 +1,46 @@
-name: Weekly Performance Summary
+name: Money Printer Bot
 
 on:
   schedule:
-    - cron: "0 13 * * 0"  # Runs every Sunday at 8:00 AM ET
+    - cron: "45 13 * * 1-5"   # 8:45 AM ET Monday–Friday
+    - cron: "30 14 * * 1-5"   # 9:30 AM ET
+    - cron: "30 16 * * 1-5"   # 11:30 AM ET
+    - cron: "30 19 * * 1-5"   # 3:30 PM ET
+    - cron: "0 13 * * 0"      # 8:00 AM ET Sunday (weekly summary)
   workflow_dispatch:
 
 jobs:
-  summary:
+  run-monolith:
+    if: github.event.schedule != '0 13 * * 0'
     runs-on: ubuntu-latest
-
     env:
+      TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+      TRADIER_ACCOUNT_ID: ${{ secrets.TRADIER_ACCOUNT_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       OFFLINE: "0"
-
     steps:
       - uses: actions/checkout@v3
-
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Run Trading Bot
+        run: python monolith.py run
 
-      - name: Run weekly summary
+  weekly-summary:
+    if: github.event.schedule == '0 13 * * 0'
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      OFFLINE: "0"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Send Weekly Summary
         run: python monolith.py summary
