@@ -32,18 +32,34 @@ def mark_trade_complete():
         json.dump({"last_trade_date": datetime.now().strftime("%Y-%m-%d")}, f)
 
 
-def get_spy_option_strike(direction):
-    return 450 if direction == "CALL" else 450
+def find_option_symbol_from_chain(direction):
+    url = f"{BASE_URL}/markets/options/chains"
+    expiration = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+    params = {
+        "symbol": "SPY",
+        "expiration": expiration,
+        "greeks": "false"
+    }
+    try:
+        response = requests.get(url, headers=HEADERS, params=params)
+        response.raise_for_status()
+        data = response.json()
+        options = data.get("options", {}).get("option", [])
 
+        if not options:
+            raise Exception("No option chains returned")
 
-def format_strike(strike):
-    return f"{strike:08.3f}".replace(".", "")
-
-
-def find_option_symbol(expiration, strike, direction):
-    option_type = "C" if direction == "CALL" else "P"
-    strike_formatted = format_strike(strike)
-    return f"SPY{expiration.strftime('%y%m%d')}{option_type}{strike_formatted}"
+        direction = direction.upper()
+        sorted_options = sorted(
+            [o for o in options if o["option_type"] == direction],
+            key=lambda x: abs(x["strike"] - 450)
+        )
+        best_option = sorted_options[0]
+        print(f"Selected valid option symbol from chain: {best_option['symbol']}")
+        return best_option["symbol"]
+    except Exception as e:
+        print(f"Error fetching option chain: {e}")
+        raise
 
 
 def place_order(option_symbol, quantity):
@@ -138,9 +154,7 @@ def execute_trade():
         return
 
     direction = "CALL"
-    strike = get_spy_option_strike(direction)
-    expiration = datetime.now() + timedelta(days=2)
-    option_symbol = find_option_symbol(expiration, strike, direction)
+    option_symbol = find_option_symbol_from_chain(direction)
 
     print(f"Placing order for {option_symbol}")
     order_result = place_order(option_symbol, 2)
@@ -166,7 +180,7 @@ def execute_trade():
         "stop_triggered": result["stop_triggered"],
         "target_hit": result["target_hit"],
         "model_confidence": None,
-        "signal_reason": "Time-based entry (demo)"
+        "signal_reason": "Time-based entry (sandbox test)"
     })
 
     send_discord_alert(
