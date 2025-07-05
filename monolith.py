@@ -24,7 +24,7 @@ OFFLINE = OFFLINE_ENV or not all([TRADIER_TOKEN, ACCOUNT_ID, OPENAI_API_KEY]) or
 if not OFFLINE and openai is not None:
     openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-TRADIER_BASE_URL = "https://sandbox.tradier.com/v1"
+TRADIER_BASE_URL = "https://api.tradier.com/v1"
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_TOKEN}",
     "Accept": "application/json",
