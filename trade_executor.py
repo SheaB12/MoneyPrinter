@@ -1,69 +1,159 @@
+import os
+import time
+import json
 import requests
-import datetime
-from config import TRADIER_TOKEN, ACCOUNT_ID
+from datetime import datetime, timedelta
+from logger import log_trade_to_sheets
 
-TRADIER_BASE_URL = "https://sandbox.tradier.com/v1"
+TRADIER_API_URL = "https://api.tradier.com/v1"
+TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")  # Set in GitHub Actions secrets
+ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")  # Also set in GitHub secrets
+IS_SANDBOX = True  # Paper trading
 
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_TOKEN}",
-    "Accept": "application/json",
-    "Content-Type": "application/x-www-form-urlencoded"
+    "Accept": "application/json"
 }
 
-def get_next_friday():
-    today = datetime.date.today()
-    days_ahead = 4 - today.weekday()  # Friday = 4
-    if days_ahead < 0:
-        days_ahead += 7
-    return (today + datetime.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+BASE_URL = "https://sandbox.tradier.com/v1" if IS_SANDBOX else TRADIER_API_URL
+TRADE_STATE_FILE = "trade_state.json"
 
-def get_spy_price():
-    url = f"{TRADIER_BASE_URL}/markets/quotes"
-    params = {"symbols": "SPY"}
-    response = requests.get(url, headers=HEADERS, params=params)
-    data = response.json()
-    return float(data["quotes"]["quote"]["last"])
 
-def get_option_symbol(direction, strike):
-    expiry = get_next_friday().replace("-", "")
-    strike_formatted = f"{int(strike*1000):08d}"  # Format to 8 digits
-    right = "C" if direction.lower() == "call" else "P"
-    return f"SPY{expiry}{right}{strike_formatted}"
+def already_traded_today():
+    if not os.path.exists(TRADE_STATE_FILE):
+        return False
+    with open(TRADE_STATE_FILE, "r") as f:
+        state = json.load(f)
+    return state.get("last_trade_date") == datetime.now().strftime("%Y-%m-%d")
 
-def place_option_trade(direction):
-    try:
-        spy_price = get_spy_price()
-        strike = round(spy_price)  # ATM
-        symbol = get_option_symbol(direction, strike)
 
-        payload = {
-            "class": "option",
-            "symbol": symbol,
-            "side": "buy_to_open",
-            "quantity": 1,
-            "type": "market",
-            "duration": "day"
-        }
+def mark_trade_complete():
+    with open(TRADE_STATE_FILE, "w") as f:
+        json.dump({"last_trade_date": datetime.now().strftime("%Y-%m-%d")}, f)
 
-        url = f"{TRADIER_BASE_URL}/accounts/{ACCOUNT_ID}/orders"
-        response = requests.post(url, headers=HEADERS, data=payload)
-        data = response.json()
 
-        if "order" in data:
-            order = data["order"]
-            return {
-                "status": "success",
-                "symbol": symbol,
-                "price": spy_price
-            }
-        else:
-            return {
-                "status": "error",
-                "error": data.get("errors", {}).get("error", "Unknown error")
-            }
+def get_spy_option_strike(direction):
+    # Basic logic: select near-the-money strike (assumes SPY ~$450)
+    return 450 if direction == "CALL" else 450
 
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+
+def find_option_symbol(expiration, strike, direction):
+    option_type = "C" if direction == "CALL" else "P"
+    root = "SPY"
+    return f"{root}{expiration.strftime('%y%m%d')}{option_type}{int(strike):05d}"
+
+
+def place_order(option_symbol, quantity):
+    url = f"{BASE_URL}/accounts/{ACCOUNT_ID}/orders"
+    payload = {
+        "class": "option",
+        "symbol": option_symbol,
+        "side": "buy_to_open",
+        "quantity": quantity,
+        "type": "market",
+        "duration": "day"
+    }
+    response = requests.post(url, headers=HEADERS, data=payload)
+    return response.json()
+
+
+def get_option_price(symbol):
+    url = f"{BASE_URL}/markets/quotes"
+    params = {"symbols": symbol}
+    r = requests.get(url, headers=HEADERS, params=params)
+    data = r.json()
+    return data['quotes']['quote']['last']
+
+
+def monitor_trade(symbol, entry_price):
+    targets = {
+        "TP1": entry_price * 1.50,
+        "TP2": entry_price * 1.75,
+        "SL": entry_price * 0.70
+    }
+
+    filled_tp1 = False
+    filled_tp2 = False
+    stop_hit = False
+
+    end_time = datetime.now().replace(hour=11, minute=0, second=0)
+    if datetime.now() > end_time:
+        end_time = datetime.now() + timedelta(minutes=15)
+
+    while datetime.now() < end_time:
+        try:
+            price = get_option_price(symbol)
+            print(f"[{datetime.now()}] Price: {price:.2f}")
+            if not filled_tp1 and price >= targets["TP1"]:
+                print("TP1 hit. Selling 1 contract.")
+                filled_tp1 = True
+            elif not filled_tp2 and price >= targets["TP2"]:
+                print("TP2 hit. Selling 1 contract.")
+                filled_tp2 = True
+            elif price <= targets["SL"]:
+                print("Stop loss hit. Exit all.")
+                stop_hit = True
+                break
+
+            if filled_tp1 and filled_tp2:
+                break
+
+            time.sleep(15)
+        except Exception as e:
+            print("Error fetching price:", e)
+            time.sleep(15)
+
+    # Calculate outcome
+    contracts_closed = int(filled_tp1) + int(filled_tp2)
+    remaining = 2 - contracts_closed
+    final_price = get_option_price(symbol)
+    avg_exit = ((filled_tp1 * targets["TP1"]) + (filled_tp2 * targets["TP2"]) + (remaining * final_price)) / 2
+    percent_gain = ((avg_exit - entry_price) / entry_price) * 100
+
+    return {
+        "exit_price": avg_exit,
+        "stop_triggered": stop_hit,
+        "target_hit": filled_tp1 or filled_tp2,
+        "percent_gain": round(percent_gain, 2)
+    }
+
+
+def execute_trade():
+    if already_traded_today():
+        print("Trade already executed today. Exiting.")
+        return
+
+    # Simulated prediction or fixed direction
+    direction = "CALL"
+    strike = get_spy_option_strike(direction)
+    expiration = datetime.now() + timedelta(days=2)  # T+2
+    option_symbol = find_option_symbol(expiration, strike, direction)
+
+    print(f"Placing order for {option_symbol}")
+    order_result = place_order(option_symbol, 2)
+    print("Order result:", order_result)
+
+    time.sleep(5)
+    entry_price = get_option_price(option_symbol)
+    print(f"Entry price: {entry_price:.2f}")
+
+    result = monitor_trade(option_symbol, entry_price)
+
+    log_trade_to_sheets({
+        "trade_id": f"{option_symbol}_{datetime.now().strftime('%Y%m%d')}",
+        "direction": direction,
+        "entry_price": entry_price,
+        "exit_price": result["exit_price"],
+        "percent_gain": result["percent_gain"],
+        "stop_triggered": result["stop_triggered"],
+        "target_hit": result["target_hit"],
+        "model_confidence": None,
+        "signal_reason": "Time-based entry (demo)"
+    })
+
+    mark_trade_complete()
+    print("Trade execution complete and logged.")
+
+
+if __name__ == "__main__":
+    execute_trade()
