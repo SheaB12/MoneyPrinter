@@ -32,9 +32,21 @@ def mark_trade_complete():
         json.dump({"last_trade_date": datetime.now().strftime("%Y-%m-%d")}, f)
 
 
+def get_next_expiration_date():
+    url = f"{BASE_URL}/markets/options/expirations"
+    params = {"symbol": "SPY"}
+    response = requests.get(url, headers=HEADERS, params=params)
+    response.raise_for_status()
+    data = response.json()
+    expirations = data.get("expirations", {}).get("date", [])
+    if not expirations:
+        raise Exception("No expirations found for SPY")
+    return expirations[0]  # Soonest valid expiration
+
+
 def find_option_symbol_from_chain(direction):
+    expiration = get_next_expiration_date()
     url = f"{BASE_URL}/markets/options/chains"
-    expiration = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
     params = {
         "symbol": "SPY",
         "expiration": expiration,
@@ -54,8 +66,10 @@ def find_option_symbol_from_chain(direction):
             [o for o in options if o["option_type"] == direction],
             key=lambda x: abs(x["strike"] - 450)
         )
+        if not sorted_options:
+            raise Exception(f"No {direction} options found near $450 for expiration {expiration}")
         best_option = sorted_options[0]
-        print(f"Selected valid option symbol from chain: {best_option['symbol']}")
+        print(f"Selected valid option symbol: {best_option['symbol']} for {expiration}")
         return best_option["symbol"]
     except Exception as e:
         print(f"Error fetching option chain: {e}")
