@@ -36,9 +36,14 @@ def get_spy_option_strike(direction):
     return 450 if direction == "CALL" else 450
 
 
+def format_strike(strike):
+    return f"{strike:08.3f}".replace(".", "")
+
+
 def find_option_symbol(expiration, strike, direction):
     option_type = "C" if direction == "CALL" else "P"
-    return f"SPY{expiration.strftime('%y%m%d')}{option_type}{int(strike):05d}"
+    strike_formatted = format_strike(strike)
+    return f"SPY{expiration.strftime('%y%m%d')}{option_type}{strike_formatted}"
 
 
 def place_order(option_symbol, quantity):
