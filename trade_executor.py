@@ -4,11 +4,12 @@ import json
 import requests
 from datetime import datetime, timedelta
 from logger import log_trade_to_sheets
+from discord_alerts import send_discord_alert
 
 TRADIER_API_URL = "https://api.tradier.com/v1"
-TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")  # Set in GitHub Actions secrets
-ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")  # Also set in GitHub secrets
-IS_SANDBOX = True  # Paper trading
+TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
+ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
+IS_SANDBOX = True
 
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_TOKEN}",
@@ -33,7 +34,6 @@ def mark_trade_complete():
 
 
 def get_spy_option_strike(direction):
-    # Basic logic: select near-the-money strike (assumes SPY ~$450)
     return 450 if direction == "CALL" else 450
 
 
@@ -103,7 +103,6 @@ def monitor_trade(symbol, entry_price):
             print("Error fetching price:", e)
             time.sleep(15)
 
-    # Calculate outcome
     contracts_closed = int(filled_tp1) + int(filled_tp2)
     remaining = 2 - contracts_closed
     final_price = get_option_price(symbol)
@@ -123,10 +122,9 @@ def execute_trade():
         print("Trade already executed today. Exiting.")
         return
 
-    # Simulated prediction or fixed direction
     direction = "CALL"
     strike = get_spy_option_strike(direction)
-    expiration = datetime.now() + timedelta(days=2)  # T+2
+    expiration = datetime.now() + timedelta(days=2)
     option_symbol = find_option_symbol(expiration, strike, direction)
 
     print(f"Placing order for {option_symbol}")
@@ -136,6 +134,12 @@ def execute_trade():
     time.sleep(5)
     entry_price = get_option_price(option_symbol)
     print(f"Entry price: {entry_price:.2f}")
+
+    # Discord alert: Trade placed
+    send_discord_alert(
+        title="📈 Trade Executed",
+        description=f"Placed SPY {direction} – {option_symbol} (2 contracts)\nEntry: ${entry_price:.2f}"
+    )
 
     result = monitor_trade(option_symbol, entry_price)
 
@@ -150,6 +154,15 @@ def execute_trade():
         "model_confidence": None,
         "signal_reason": "Time-based entry (demo)"
     })
+
+    # Discord alert: Trade closed
+    send_discord_alert(
+        title="✅ Trade Closed",
+        description=f"Exit: ${result['exit_price']:.2f}\n"
+                    f"PnL: {result['percent_gain']}%\n"
+                    f"Target Hit: {result['target_hit']}\n"
+                    f"Stop Triggered: {result['stop_triggered']}"
+    )
 
     mark_trade_complete()
     print("Trade execution complete and logged.")
