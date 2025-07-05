@@ -1,21 +1,15 @@
-name: Daily Monolith Run
+name: Weekly Performance Summary
 
 on:
   schedule:
-    - cron: "45 13 * * *"  # 8:45 AM ET
-    - cron: "30 14 * * *"  # 9:30 AM ET
-    - cron: "30 16 * * *"  # 11:30 AM ET
-    - cron: "30 19 * * *"  # 3:30 PM ET
+    - cron: "0 13 * * 0"  # Runs every Sunday at 8:00 AM ET
   workflow_dispatch:
 
 jobs:
-  run:
+  summary:
     runs-on: ubuntu-latest
 
     env:
-      TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
-      TRADIER_ACCOUNT_ID: ${{ secrets.TRADIER_ACCOUNT_ID }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       OFFLINE: "0"
 
@@ -29,5 +23,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run monolith
-        run: python monolith.py run
+      - name: Run weekly summary
+        run: python monolith.py summary
