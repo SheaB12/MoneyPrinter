@@ -32,47 +32,37 @@ def mark_trade_complete():
         json.dump({"last_trade_date": datetime.now().strftime("%Y-%m-%d")}, f)
 
 
-def get_next_expiration_date():
-    url = f"{BASE_URL}/markets/options/expirations"
-    params = {"symbol": "SPY"}
-    response = requests.get(url, headers=HEADERS, params=params)
-    response.raise_for_status()
-    data = response.json()
-    expirations = data.get("expirations", {}).get("date", [])
-    if not expirations:
-        raise Exception("No expirations found for SPY")
-    return expirations[0]  # Soonest valid expiration
-
-
 def find_option_symbol_from_chain(direction):
-    expiration = get_next_expiration_date()
-    url = f"{BASE_URL}/markets/options/chains"
-    params = {
-        "symbol": "SPY",
-        "expiration": expiration,
-        "greeks": "false"
-    }
-    try:
-        response = requests.get(url, headers=HEADERS, params=params)
-        response.raise_for_status()
-        data = response.json()
-        options = data.get("options", {}).get("option", [])
+    url_exp = f"{BASE_URL}/markets/options/expirations"
+    params = {"symbol": "SPY"}
+    response = requests.get(url_exp, headers=HEADERS, params=params)
+    response.raise_for_status()
+    expirations = response.json().get("expirations", {}).get("date", [])
 
-        if not options:
-            raise Exception("No option chains returned")
+    direction = direction.upper()
 
-        direction = direction.upper()
-        filtered = [o for o in options if o["option_type"] == direction]
+    for expiration in expirations:
+        try:
+            url_chain = f"{BASE_URL}/markets/options/chains"
+            chain_params = {
+                "symbol": "SPY",
+                "expiration": expiration,
+                "greeks": "false"
+            }
+            resp = requests.get(url_chain, headers=HEADERS, params=chain_params)
+            resp.raise_for_status()
+            options = resp.json().get("options", {}).get("option", [])
 
-        if not filtered:
-            raise Exception(f"No {direction} options found for expiration {expiration}")
+            filtered = [o for o in options if o["option_type"] == direction]
+            if filtered:
+                best_option = filtered[0]
+                print(f"Selected {direction} option: {best_option['symbol']} (exp: {expiration})")
+                return best_option["symbol"]
+        except Exception as e:
+            print(f"Skipping expiration {expiration} due to error: {e}")
+            continue
 
-        best_option = filtered[0]
-        print(f"Selected {direction} option: {best_option['symbol']}")
-        return best_option["symbol"]
-    except Exception as e:
-        print(f"Error fetching option chain: {e}")
-        raise
+    raise Exception(f"No valid {direction} options found for any expiration.")
 
 
 def place_order(option_symbol, quantity):
