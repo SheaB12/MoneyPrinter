@@ -33,7 +33,7 @@ HEADERS = {
 
 LOG_FILE = "trade_log.csv"
 
-# === Helpers ===
+# === Discord Alerts ===
 
 def send_discord_embed(title: str, description: str, color: int = 0x5865F2, fields: list = None):
     if not DISCORD_WEBHOOK_URL:
@@ -56,6 +56,8 @@ def send_discord_embed(title: str, description: str, color: int = 0x5865F2, fiel
         )
     except Exception as e:
         print(f"❌ Failed to send Discord embed: {e}")
+
+# === Option Helpers ===
 
 def get_next_friday():
     today = datetime.date.today()
@@ -117,6 +119,8 @@ def get_valid_option_symbol(direction: str, strike_type: str = "ATM") -> tuple:
 
     return selected["symbol"], selected["strike"]
 
+# === Trade Execution ===
+
 def place_option_trade(direction: str, strike_type: str = "ATM"):
     try:
         symbol, strike = get_valid_option_symbol(direction, strike_type)
@@ -136,14 +140,18 @@ def place_option_trade(direction: str, strike_type: str = "ATM"):
         }
         url = f"{TRADIER_BASE_URL}/accounts/{ACCOUNT_ID}/orders"
         resp = requests.post(url, headers=HEADERS, data=payload)
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            return {"status": "error", "error": "Invalid JSON from Tradier"}
+
         if "order" in data:
             return {"status": "success", "symbol": symbol, "underlying_price": price}
         return {"status": "error", "error": data.get("errors", {}).get("error", "Unknown")}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
-# === GPT Decision ===
+# === GPT Logic ===
 
 def gpt_trade_decision(df: pd.DataFrame) -> dict:
     last_5 = df.tail(5)
@@ -246,16 +254,9 @@ def run_bot():
 
 if __name__ == "__main__":
     import argparse
-
-    parser = argparse.ArgumentParser(description="Combined Money Printer script")
-    parser.add_argument("command", choices=["run", "dashboard", "monitor", "test-strikes"], help="Action to perform")
+    parser = argparse.ArgumentParser(description="Money Printer bot")
+    parser.add_argument("command", choices=["run"])
     args = parser.parse_args()
 
     if args.command == "run":
         run_bot()
-    elif args.command == "dashboard":
-        app.run(debug=False)
-    elif args.command == "monitor":
-        check_trailing_and_update()
-    elif args.command == "test-strikes":
-        test_strikes()
