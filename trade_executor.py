@@ -156,7 +156,7 @@ def execute_trade():
         print("Trade already executed today. Exiting.")
         return
 
-    direction = "CALL"
+    direction = "PUT"  # ✅ TEMPORARY FIX FOR SANDBOX RELIABILITY
     option_symbol = find_option_symbol_from_chain(direction)
 
     print(f"Placing order for {option_symbol}")
@@ -168,7 +168,7 @@ def execute_trade():
     print(f"Entry price: {entry_price:.2f}")
 
     send_discord_alert(
-        title="📈 Trade Executed",
+        title="📉 Trade Executed (PUT)",
         description=f"Placed SPY {direction} – {option_symbol} (2 contracts)\nEntry: ${entry_price:.2f}"
     )
 
