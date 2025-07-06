@@ -5,3 +5,5 @@ yfinance
 requests
 schedule
 python-dotenv
+gspread
+oauth2client
