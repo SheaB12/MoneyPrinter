@@ -8,7 +8,7 @@ from discord_alerts import send_discord_alert
 
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
 ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
-IS_SANDBOX = True
+IS_SANDBOX = False
 
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_TOKEN}",
