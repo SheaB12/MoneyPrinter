@@ -2,13 +2,15 @@ import os
 import time
 import json
 import requests
+import pandas as pd
 from datetime import datetime, timedelta
 from logger import log_trade_to_sheets
 from discord_alerts import send_discord_alert
+from gpt_decider import gpt_decision
 
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
 ACCOUNT_ID = os.getenv("TRADIER_ACCOUNT_ID")
-IS_SANDBOX = False
+IS_SANDBOX = False  # Live paper trading
 
 HEADERS = {
     "Authorization": f"Bearer {TRADIER_TOKEN}",
@@ -17,6 +19,7 @@ HEADERS = {
 
 BASE_URL = "https://sandbox.tradier.com/v1" if IS_SANDBOX else "https://api.tradier.com/v1"
 TRADE_STATE_FILE = "trade_state.json"
+MIN_CONFIDENCE = 60
 
 
 def already_traded_today():
@@ -30,6 +33,24 @@ def already_traded_today():
 def mark_trade_complete():
     with open(TRADE_STATE_FILE, "w") as f:
         json.dump({"last_trade_date": datetime.now().strftime("%Y-%m-%d")}, f)
+
+
+def fetch_spy_candles():
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(minutes=30)
+    url = f"{BASE_URL}/markets/timesales"
+    params = {
+        "symbol": "SPY",
+        "interval": "1min",
+        "start": start_time.strftime("%Y-%m-%dT%H:%M"),
+        "end": end_time.strftime("%Y-%m-%dT%H:%M"),
+        "session_filter": "open"
+    }
+    r = requests.get(url, headers=HEADERS, params=params)
+    r.raise_for_status()
+    data = r.json().get("series", {}).get("data", [])
+    df = pd.DataFrame(data)
+    return df
 
 
 def find_option_symbol_from_chain(direction):
@@ -53,7 +74,7 @@ def find_option_symbol_from_chain(direction):
             resp.raise_for_status()
             options = resp.json().get("options", {}).get("option", [])
 
-            filtered = [o for o in options if o["option_type"] == direction]
+            filtered = [o for o in options if o["option_type"] == direction and o["strike"] >= 300 and o["last"] > 0]
             if filtered:
                 best_option = filtered[0]
                 print(f"Selected {direction} option: {best_option['symbol']} (exp: {expiration})")
@@ -80,14 +101,8 @@ def place_order(option_symbol, quantity):
         print("Raw response:", response.text)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP Error: {http_err}")
-        raise
-    except requests.exceptions.RequestException as req_err:
-        print(f"Request Error: {req_err}")
-        raise
-    except json.JSONDecodeError:
-        print("Tradier API did not return valid JSON.")
+    except Exception as e:
+        print(f"Order placement failed: {e}")
         raise
 
 
@@ -95,20 +110,14 @@ def get_option_price(symbol):
     url = f"{BASE_URL}/markets/quotes"
     params = {"symbols": symbol}
     r = requests.get(url, headers=HEADERS, params=params)
+    r.raise_for_status()
     data = r.json()
     return data['quotes']['quote']['last']
 
 
-def monitor_trade(symbol, entry_price):
-    targets = {
-        "TP1": entry_price * 1.50,
-        "TP2": entry_price * 1.75,
-        "SL": entry_price * 0.70
-    }
-
-    filled_tp1 = False
-    filled_tp2 = False
-    stop_hit = False
+def monitor_trade(symbol, entry_price, stop_pct, target_pct):
+    tp1 = entry_price * (1 + target_pct / 100)
+    sl = entry_price * (1 - stop_pct / 100)
 
     end_time = datetime.now().replace(hour=11, minute=0, second=0)
     if datetime.now() > end_time:
@@ -118,84 +127,82 @@ def monitor_trade(symbol, entry_price):
         try:
             price = get_option_price(symbol)
             print(f"[{datetime.now()}] Price: {price:.2f}")
-            if not filled_tp1 and price >= targets["TP1"]:
-                print("TP1 hit. Selling 1 contract.")
-                filled_tp1 = True
-            elif not filled_tp2 and price >= targets["TP2"]:
-                print("TP2 hit. Selling 1 contract.")
-                filled_tp2 = True
-            elif price <= targets["SL"]:
-                print("Stop loss hit. Exit all.")
-                stop_hit = True
-                break
-
-            if filled_tp1 and filled_tp2:
-                break
-
+            if price >= tp1:
+                print("Target hit. Exiting.")
+                return price, False, True
+            elif price <= sl:
+                print("Stop loss hit. Exiting.")
+                return price, True, False
             time.sleep(15)
         except Exception as e:
-            print("Error fetching price:", e)
+            print(f"Error during monitoring: {e}")
             time.sleep(15)
 
-    contracts_closed = int(filled_tp1) + int(filled_tp2)
-    remaining = 2 - contracts_closed
-    final_price = get_option_price(symbol)
-    avg_exit = ((filled_tp1 * targets["TP1"]) + (filled_tp2 * targets["TP2"]) + (remaining * final_price)) / 2
-    percent_gain = ((avg_exit - entry_price) / entry_price) * 100
-
-    return {
-        "exit_price": avg_exit,
-        "stop_triggered": stop_hit,
-        "target_hit": filled_tp1 or filled_tp2,
-        "percent_gain": round(percent_gain, 2)
-    }
+    final = get_option_price(symbol)
+    return final, False, False
 
 
 def execute_trade():
     if already_traded_today():
-        print("Trade already executed today. Exiting.")
+        print("Trade already executed today.")
         return
 
-    direction = "PUT"  # ✅ TEMPORARY FIX FOR SANDBOX RELIABILITY
-    option_symbol = find_option_symbol_from_chain(direction)
+    df = fetch_spy_candles()
+    gpt = gpt_decision(df)
 
+    if not gpt or gpt.get("decision") not in ["call", "put"]:
+        print("GPT said to skip this trade.")
+        return
+
+    if gpt["confidence"] < MIN_CONFIDENCE:
+        print(f"GPT confidence too low ({gpt['confidence']}%). Skipping trade.")
+        return
+
+    direction = gpt["decision"].upper()
+    stop_pct = gpt.get("stop_loss_pct", 30)
+    target_pct = gpt.get("target_pct", 50)
+
+    option_symbol = find_option_symbol_from_chain(direction)
     print(f"Placing order for {option_symbol}")
-    order_result = place_order(option_symbol, 2)
-    print("Order result:", order_result)
+    place_order(option_symbol, 2)
 
     time.sleep(5)
-    entry_price = get_option_price(option_symbol)
-    print(f"Entry price: {entry_price:.2f}")
+    entry = get_option_price(option_symbol)
 
     send_discord_alert(
-        title="📉 Trade Executed (PUT)",
-        description=f"Placed SPY {direction} – {option_symbol} (2 contracts)\nEntry: ${entry_price:.2f}"
+        title="🤖 GPT Trade Triggered",
+        description=f"**Direction**: {direction}\n"
+                    f"**Option**: {option_symbol}\n"
+                    f"**Confidence**: {gpt['confidence']}%\n"
+                    f"**Reason**: {gpt['reason']}\n"
+                    f"**Entry**: ${entry:.2f}\n"
+                    f"**SL**: {stop_pct}% | **TP**: {target_pct}%"
     )
 
-    result = monitor_trade(option_symbol, entry_price)
+    exit_price, stop_hit, target_hit = monitor_trade(option_symbol, entry, stop_pct, target_pct)
+    pnl = ((exit_price - entry) / entry) * 100
 
     log_trade_to_sheets({
         "trade_id": f"{option_symbol}_{datetime.now().strftime('%Y%m%d')}",
         "direction": direction,
-        "entry_price": entry_price,
-        "exit_price": result["exit_price"],
-        "percent_gain": result["percent_gain"],
-        "stop_triggered": result["stop_triggered"],
-        "target_hit": result["target_hit"],
-        "model_confidence": None,
-        "signal_reason": "Time-based entry (sandbox test)"
+        "entry_price": entry,
+        "exit_price": exit_price,
+        "percent_gain": round(pnl, 2),
+        "stop_triggered": stop_hit,
+        "target_hit": target_hit,
+        "model_confidence": gpt['confidence'],
+        "signal_reason": gpt['reason']
     })
 
     send_discord_alert(
         title="✅ Trade Closed",
-        description=f"Exit: ${result['exit_price']:.2f}\n"
-                    f"PnL: {result['percent_gain']}%\n"
-                    f"Target Hit: {result['target_hit']}\n"
-                    f"Stop Triggered: {result['stop_triggered']}"
+        description=f"Exit: ${exit_price:.2f}\n"
+                    f"PnL: {round(pnl, 2)}%\n"
+                    f"Target Hit: {target_hit}\n"
+                    f"Stop Triggered: {stop_hit}"
     )
 
     mark_trade_complete()
-    print("Trade execution complete and logged.")
 
 
 if __name__ == "__main__":
