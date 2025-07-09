@@ -1,68 +1,76 @@
-import os
-import json
 import openai
 import pandas as pd
-from dotenv import load_dotenv
-from logger import get_recent_logs, log_trade_decision
+import json
+import os
+from datetime import datetime
+from alerts import send_trade_alert, send_threshold_change_alert
+from logger import log_trade_decision, get_recent_logs
 from strategy import detect_market_regime, calculate_atr
 
-load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+
 def gpt_decision(df):
-    if "Datetime" not in df.columns:
-        df = df.reset_index()
-    if "Datetime" not in df.columns:
-        raise ValueError("Datetime column is missing after reset_index.")
-
-    df["Datetime"] = pd.to_datetime(df["Datetime"])
-    df = df.sort_values("Datetime")
-
-    # Add technical context
-    market_regime = detect_market_regime(df)
-    atr = calculate_atr(df)
-
-    # Use the last 30 minutes of data
-    recent_df = df.tail(30)
-    candle_records = recent_df.to_dict(orient="records")  # ✅ JSON-safe format
-
     try:
-        recent_logs = get_recent_logs(limit=50)  # Use logs to influence decisions
+        recent_logs = get_recent_logs()  # ✅ No limit parameter
     except Exception as e:
         print(f"Error fetching recent logs: {e}")
         recent_logs = []
 
-    # GPT prompt construction
+    # Prepare recent SPY data for GPT
+    recent_df = df.tail(30).copy()
+    recent_df.reset_index(drop=True, inplace=True)  # ✅ Prevent tuple index keys
+    candle_records = recent_df.to_dict(orient="records")  # ✅ JSON-safe
+
     prompt = (
-        f"You are an options trading assistant. Based on recent SPY 1-minute candles, provide a trade decision.\n"
-        f"Current market regime: {market_regime}\n"
-        f"ATR (14): {atr:.2f}\n"
-        f"Recent trade outcomes: {recent_logs}\n"
+        "You are a trading assistant. Your task is to analyze recent SPY 1-minute candles "
+        "and determine whether to buy a CALL, PUT, or SKIP the trade. Only reply with a JSON object like this:\n\n"
+        '{"action": "call", "confidence": 72, "reason": "brief explanation"}\n\n'
+        "Your decision should be based on momentum, recent price movement, and possible trend continuation.\n\n"
         f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}\n\n"
-        "Respond in JSON with keys: action (call/put/skip), confidence (0–100), reason (short text)."
+        f"Recent decisions: {recent_logs}"
     )
 
     print("📡 Sending prompt to GPT...")
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a financial assistant that helps with options trade decisions."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=300,
-        temperature=0.4
-    )
-
-    reply = response.choices[0].message['content']
-    print(f"🤖 GPT replied:\n\n{reply}\n")
 
     try:
-        decision_data = json.loads(reply)
-        decision_data["market_regime"] = market_regime
-        decision_data["atr"] = atr
-        decision_data["raw_prompt"] = prompt
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a smart trading assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4,
+            max_tokens=300,
+        )
+
+        reply = response.choices[0].message['content']
+        print("🤖 GPT replied:\n")
+        print(reply)
+
+        decision = json.loads(reply)
+
+        # Validate structure
+        action = decision.get("action", "").lower()
+        confidence = int(decision.get("confidence", 0))
+        reason = decision.get("reason", "")
+
+        if action not in ["call", "put", "skip"]:
+            raise ValueError(f"Invalid action: {action}")
+
+        decision_data = {
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "action": action,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+        # Log and alert
         log_trade_decision(decision_data)
+        send_trade_alert(decision_data)
+
         return decision_data
+
     except Exception as e:
-        print(f"❌ Error parsing GPT response: {e}")
-        return {"action": "skip", "confidence": 0, "reason": "Error parsing GPT response"}
+        print(f"❌ GPT decision error: {e}")
+        return {"action": "skip", "confidence": 0, "reason": "GPT error fallback"}
