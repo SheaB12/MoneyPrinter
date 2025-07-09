@@ -1,24 +1,23 @@
 import os
-import base64
 import json
-import gspread
+import base64
 from datetime import datetime
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
 
-# Setup Google Sheets credentials
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# Load credentials from env variable
 google_key = os.getenv("GOOGLE_SHEETS_KEY_B64")
-
 if not google_key:
-    raise ValueError("GOOGLE_SHEETS_KEY_B64 environment variable is not set. Check GitHub Actions config.")
+    raise ValueError("GOOGLE_SHEETS_KEY_B64 environment variable is not set.")
 
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_dict = json.loads(base64.b64decode(google_key))
 credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(credentials)
 
 SHEET_NAME = "GPT_Trade_Log"
 TAB_NAME = "GPT Decisions"
-
 HEADERS = ["Timestamp", "Direction", "Confidence", "Threshold", "Reason", "Status", "Symbol", "Price"]
 
 def get_or_create_sheet():
@@ -43,7 +42,6 @@ def get_recent_logs():
     try:
         sheet = get_or_create_sheet()
         data = sheet.get_all_records()
-        import pandas as pd
         return pd.DataFrame(data).tail(20)
     except Exception as e:
         print(f"Error fetching recent logs: {e}")
