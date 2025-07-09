@@ -1,66 +1,52 @@
+import openai
 import os
 import json
 import pandas as pd
-from openai import OpenAI
 from config import OPENAI_API_KEY
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
-def gpt_decision(df: pd.DataFrame) -> dict:
-    """
-    Pass last 30 minutes of SPY data to GPT and return trade decision.
-    Expected GPT response (JSON format):
-    {
-        "decision": "call" or "put" or "skip",
-        "confidence": 0–100,
-        "reason": "...",
-        "stop_loss_pct": 30,
-        "target_pct": 60
-    }
-    """
+def gpt_decision(data: pd.DataFrame) -> dict:
+    # Convert timestamp to string for serialization
+    data["timestamp"] = data["Datetime"].dt.strftime("%Y-%m-%d %H:%M")
+    candle_data = data[["timestamp", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
 
-    # Format price action data for prompt
-    candle_data = df.tail(30).to_dict(orient="records")
+    prompt = (
+        "You are an expert SPY options day trader. Analyze the market data and decide whether to buy a CALL or PUT "
+        "option based on the short-term trend.\n\n"
+        "Instructions:\n"
+        "- Use ONLY the following 1-minute candle data from the last 30 minutes.\n"
+        "- Determine if there's a clear uptrend or downtrend.\n"
+        "- If an uptrend, choose CALL. If a downtrend, choose PUT. If uncertain, say NO TRADE.\n"
+        "- Provide your decision, a confidence score from 0 to 1, and a reason.\n\n"
+        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_data)}\n\n"
+        "Respond with a JSON object in the following format:\n"
+        "{ \"decision\": \"CALL\", \"confidence\": 0.85, \"reason\": \"brief reason here\" }"
+    )
 
-    # Construct system + user messages
-    system_msg = {
-        "role": "system",
-        "content": (
-            "You are an expert SPY options trader helping decide trades based on short-term momentum, "
-            "technical indicators, and market structure. Always reply in JSON with keys: "
-            "decision (call/put/skip), confidence, reason, stop_loss_pct, target_pct."
-        )
-    }
-
-    user_msg = {
-        "role": "user",
-        "content": (
-            f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_data)}\n\n"
-            "Make a trade decision for the next 30 minutes."
-        )
-    }
-
-    # Call GPT-4
     try:
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[system_msg, user_msg],
-            temperature=0.4
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
         )
 
-        gpt_raw = response.choices[0].message.content.strip()
+        content = response["choices"][0]["message"]["content"]
+        result = json.loads(content)
 
-        # Try parsing GPT response to JSON
-        decision = json.loads(gpt_raw)
-        return decision
+        decision = result.get("decision", "NO TRADE").upper()
+        confidence = float(result.get("confidence", 0.0))
+        reason = result.get("reason", "")
+
+        return {
+            "decision": decision,
+            "confidence": confidence,
+            "reason": reason
+        }
 
     except Exception as e:
-        print("⚠️ GPT error:", e)
         return {
-            "decision": "skip",
-            "confidence": 0,
-            "reason": f"GPT error: {e}",
-            "stop_loss_pct": 30,
-            "target_pct": 60
+            "decision": "NO TRADE",
+            "confidence": 0.0,
+            "reason": f"Error communicating with GPT: {str(e)}"
         }
