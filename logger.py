@@ -2,6 +2,20 @@ import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 import os
+import json
+from google.oauth2.service_account import Credentials
+
+def load_credentials_from_env():
+    if "GOOGLE_SHEETS_KEY_B64" not in os.environ:
+        raise EnvironmentError("Missing GOOGLE_SHEETS_KEY_B64 in environment variables.")
+    
+    try:
+        decoded_json = json.loads(
+            base64.b64decode(os.environ["GOOGLE_SHEETS_KEY_B64"]).decode("utf-8")
+        )
+        return Credentials.from_service_account_info(decoded_json, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    except Exception as e:
+        raise ValueError(f"Failed to load service account credentials: {e}")
 
 # Setup Google Sheets connection
 def get_gsheet_client():
