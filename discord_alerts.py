@@ -1,24 +1,28 @@
 import os
 import requests
 
-def send_discord_alert(message: str):
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-    if not webhook_url:
-        raise EnvironmentError("DISCORD_WEBHOOK_URL is not set in environment variables.")
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-    payload = {
-        "content": None,
-        "embeds": [
-            {
-                "title": "💸 Money Printer GPT Decision",
-                "description": message,
-                "color": 5763719 if "CALL" in message else 15548997
-            }
-        ]
-    }
+def send_discord_alert(message):
+    if not WEBHOOK_URL:
+        raise EnvironmentError("DISCORD_WEBHOOK_URL is not set.")
+    payload = {"content": message}
+    requests.post(WEBHOOK_URL, json=payload)
 
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(webhook_url, json=payload, headers=headers)
+def format_discord_message(decision, status):
+    emoji = "✅" if status == "EXECUTED" else "⚠️"
+    return (
+        f"🪩 **Decision**: `{decision['decision'].upper()}`\n"
+        f"✅ **Confidence**: `{decision['confidence'] * 100:.2f}%`\n"
+        f"💬 **Reason**: {decision['reason']}\n"
+        f"{emoji} **Status**: {status}"
+    )
 
-    if response.status_code != 204:
-        raise Exception(f"Failed to send Discord alert: {response.status_code}, {response.text}")
+def alert_threshold_change(new, old):
+    diff = (new - old) * 100
+    emoji = "📊"
+    send_discord_alert(
+        f"{emoji} **Threshold Change Alert**\n"
+        f"Old: `{old * 100:.2f}%` → New: `{new * 100:.2f}%`\n"
+        f"Change: `{diff:+.2f}%`"
+    )
