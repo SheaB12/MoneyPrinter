@@ -28,6 +28,7 @@ jobs:
           GSHEETS_KEY_B64: ${{ secrets.GSHEETS_KEY_B64 }}
         run: |
           echo $GSHEETS_KEY_B64 | base64 -d > google_sheets.json
+          echo "${{ secrets.GOOGLE_SHEETS_KEY_B64 }}"
 
       - name: 💬 Set Discord Webhook URL
         run: echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> $GITHUB_ENV
