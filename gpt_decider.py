@@ -32,45 +32,30 @@ def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
     avg_conf = sum(conf_list) / len(conf_list) if conf_list else 0.6
     base = 0.6
 
-    # Scale based on win rate and volatility
     threshold = base + ((win_rate - 0.5) * 0.2) + ((atr - 1.5) * 0.02) + ((avg_conf - 0.6) * 0.1)
     return max(0.5, min(threshold, 0.85))
 
 def gpt_decision(df: pd.DataFrame):
     df = df.copy().reset_index()
-
-    # Safely assign 'Datetime'
-    if "Datetime" not in df.columns:
-        if df.columns[0] != "Datetime":
-            df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
-
-    df = df.loc[:, ~df.columns.duplicated()].copy()
     df["Datetime"] = pd.to_datetime(df["Datetime"])
     df["Datetime"] = df["Datetime"].dt.strftime('%Y-%m-%d %H:%M')
 
     recent_data = df.tail(30)
+    recent_data.columns = [str(c) for c in recent_data.columns]  # 🔧 Fix for JSON encoding
     candle_data = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
-    
+
     market_regime = determine_market_regime(df)
     atr = calculate_atr(df)
 
-    try:
-        logs_df = get_recent_logs(limit=20)
-        recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
-    except Exception as e:
-        print("Error fetching recent logs:", e)
-        logs_df = pd.DataFrame()
-        recent_confs = []
-
+    logs_df = get_recent_logs(limit=20)
+    recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
     dynamic_threshold = calculate_dynamic_threshold(logs_df, atr, recent_confs)
     last_threshold = get_last_confidence_threshold()
 
-    # Alert if threshold changed significantly
     if abs(dynamic_threshold - last_threshold) >= 0.05:
         send_threshold_change_alert(dynamic_threshold, last_threshold)
         save_confidence_threshold(dynamic_threshold)
 
-    # Build prompt
     prompt = (
         "You're a stock trading AI that analyzes SPY chart data. "
         f"The current market regime is: {market_regime}. "
