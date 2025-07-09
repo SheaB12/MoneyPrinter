@@ -1,24 +1,32 @@
 import os
 import requests
+from dotenv import load_dotenv
 
-def send_discord_alert(message: str):
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-    if not webhook_url:
-        raise EnvironmentError("DISCORD_WEBHOOK_URL is not set in environment variables.")
+load_dotenv()
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
+def send_discord_alert(content):
+    if not WEBHOOK_URL:
+        raise EnvironmentError("DISCORD_WEBHOOK_URL is not set.")
+    
     payload = {
-        "content": None,
-        "embeds": [
-            {
-                "title": "💸 Money Printer GPT Decision",
-                "description": message,
-                "color": 5763719 if "CALL" in message else 15548997
-            }
-        ]
+        "content": content
     }
 
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(webhook_url, json=payload, headers=headers)
-
+    response = requests.post(WEBHOOK_URL, json=payload)
     if response.status_code != 204:
-        raise Exception(f"Failed to send Discord alert: {response.status_code}, {response.text}")
+        print(f"❌ Discord alert failed: {response.text}")
+
+def format_discord_message(decision, status):
+    emoji = "📈" if decision["decision"] == "CALL" else "📉"
+    status_emoji = "✅" if status == "EXECUTED" else "⚠️"
+
+    return (
+        f"{emoji} **Decision:** {decision['decision']}\n"
+        f"🎯 **Confidence:** {round(decision['confidence'] * 100, 2)}%\n"
+        f"🗒️ **Reason:** {decision['reason']}\n"
+        f"{status_emoji} **Status:** {status}"
+    )
+
+def alert_threshold_change(message):
+    send_discord_alert(f"📢 **Threshold Update**\n{message}")
