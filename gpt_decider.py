@@ -1,66 +1,55 @@
-import os
 import json
-import openai
+from datetime import datetime
+from openai import OpenAI
 import pandas as pd
-from statistics import mean
-from logger import read_sheet_column
+from strategy import detect_market_regime
 from dotenv import load_dotenv
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
+MODEL = "gpt-4"
 
-def gpt_decision(df, threshold):
+def gpt_decision(df, recent_stats):
     df = df.copy()
-    df["Datetime"] = df.index
-    df["Datetime"] = df["Datetime"].dt.strftime('%Y-%m-%d %H:%M')
+    df["Datetime"] = pd.to_datetime(df["timestamp"])
+    candle_data = df[["timestamp", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
 
-    candle_data = df[["Datetime", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
-
-    messages = [
-        {"role": "system", "content": "You are a stock market analyst that decides whether to buy CALL or PUT options."},
-        {"role": "user", "content": f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_data)}\n\nReturn your decision as JSON with keys: decision (CALL or PUT), confidence (0.0–1.0), and reason (1-2 sentence explanation)."}
-    ]
-
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=messages,
-        temperature=0.3
+    system_prompt = (
+        "You are a professional SPY options day trader. Based on the last 30 minutes of 1-minute candles, "
+        "make a binary trade decision: CALL, PUT, or NONE. Respond in this JSON format:\n"
+        "{ \"decision\": CALL|PUT|NONE, \"confidence\": float(0-1), \"reason\": string }"
     )
 
-    content = response.choices[0].message["content"]
+    regime = detect_market_regime(df)
+    context_prompt = f"Market regime: {regime}.\n\nHere is the last 30 minutes of SPY data:\n{json.dumps(candle_data)}"
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": context_prompt}
+        ]
+    )
 
     try:
-        parsed = json.loads(content)
-    except:
-        parsed = {"decision": "NONE", "confidence": 0.0, "reason": "Parsing failed"}
+        reply = json.loads(response.choices[0].message.content)
+    except Exception as e:
+        reply = {
+            "decision": "NONE",
+            "confidence": 0.0,
+            "reason": f"GPT response invalid: {e}"
+        }
 
-    parsed["timestamp"] = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
-    return parsed
+    reply["timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M')
 
-def calculate_dynamic_threshold(sheet_name):
-    conf_col = read_sheet_column(sheet_name, "GPT Decisions", "Confidence (%)")
-    result_col = read_sheet_column(sheet_name, "GPT Decisions", "Status")
+    # Dynamic threshold
+    old_threshold = 0.60
+    win_rate = recent_stats.get("win_rate", 0.60)
+    atr = recent_stats.get("atr", 1.0)
+    avg_conf = recent_stats.get("avg_confidence", 0.60)
 
-    if not conf_col or not result_col:
-        return 0.6, ""
+    # Simple adaptive formula (tuneable)
+    threshold = 0.55 + (win_rate - 0.5) * 0.5 + (avg_conf - 0.6) * 0.2
+    threshold = max(0.50, min(threshold, 0.85))
 
-    try:
-        recent_conf = conf_col[-30:]
-        avg_conf = mean([float(x) for x in recent_conf if x])
-    except:
-        avg_conf = 0.6
-
-    recent_results = result_col[-30:]
-    wins = sum(1 for r in recent_results if r == "EXECUTED")
-    win_rate = wins / len(recent_results) if recent_results else 0.5
-
-    atr = abs(avg_conf - 0.6)
-    new_threshold = 0.6 + (0.1 * (0.5 - win_rate)) + atr
-
-    new_threshold = max(0.5, min(0.8, round(new_threshold, 2)))
-
-    notes = ""
-    if abs(new_threshold - 0.6) > 0.05:
-        notes = f"📊 New adaptive confidence threshold: **{new_threshold * 100:.1f}%**\nWin rate: {win_rate:.2%}, Avg confidence: {avg_conf:.2f}"
-
-    return new_threshold, notes
+    return reply, threshold, old_threshold
