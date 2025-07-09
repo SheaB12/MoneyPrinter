@@ -1,44 +1,32 @@
 import os
 import gspread
-from google.oauth2.service_account import Credentials
-from datetime import datetime
+from oauth2client.service_account import ServiceAccountCredentials
 
-SHEET_NAME = "Money Printer Logs"
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = Credentials.from_service_account_file("google_sheets.json", scopes=SCOPES)
-client = gspread.authorize(creds)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+google_key = os.getenv("GOOGLE_SHEETS_KEY_B64")
 
-def get_or_create_sheet(sheet_name, tab, headers):
+import base64
+import json
+
+creds_dict = json.loads(base64.b64decode(google_key))
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(credentials)
+
+SHEET_NAME = "GPT_Trade_Log"
+
+def get_or_create_sheet(sheet_name, tab_name, headers):
     try:
-        sheet = client.open(sheet_name)
-    except:
-        sheet = client.create(sheet_name)
-    try:
-        worksheet = sheet.worksheet(tab)
-    except:
-        worksheet = sheet.add_worksheet(title=tab, rows="1000", cols="20")
-        worksheet.append_row(headers)
-    return worksheet
+        sheet = client.open(sheet_name).worksheet(tab_name)
+    except gspread.SpreadsheetNotFound:
+        sheet = client.create(sheet_name).sheet1
+        sheet.update_title(tab_name)
+        sheet.append_row(headers)
+    except gspread.WorksheetNotFound:
+        sheet = client.open(sheet_name).add_worksheet(title=tab_name, rows="1000", cols="20")
+        sheet.append_row(headers)
+    return sheet
 
-def log_to_sheet(row, tab):
-    headers = ["Timestamp", "Decision", "Confidence", "Reason", "Status"]
-    sheet = get_or_create_sheet(SHEET_NAME, tab, headers)
-    sheet.append_row(row)
-
-def get_recent_stats():
-    try:
-        worksheet = client.open(SHEET_NAME).worksheet("GPT Decisions")
-        data = worksheet.get_all_records()
-        if not data:
-            return {}
-
-        df = pd.DataFrame(data)
-        recent = df.tail(20)
-
-        win_rate = (recent["Status"] == "EXECUTED").mean()
-        avg_conf = recent["Confidence"].mean()
-        atr = (recent["Confidence"].max() - recent["Confidence"].min())  # crude proxy for volatility
-
-        return {"win_rate": win_rate, "avg_confidence": avg_conf, "atr": atr}
-    except:
-        return {}
+def log_to_sheet(row_data):
+    headers = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]  # ✅ Reason included
+    sheet = get_or_create_sheet(SHEET_NAME, "GPT Decisions", headers)
+    sheet.append_row(row_data)
