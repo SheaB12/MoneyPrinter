@@ -31,23 +31,30 @@ def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
     return max(0.5, min(threshold, 0.85))
 
 def gpt_decision(df: pd.DataFrame):
-    df = df.copy().reset_index()
+    df = df.copy()
 
-    # Ensure proper column names
-    df = df.rename(columns={
-        "index": "Datetime",
-        "date": "Datetime"
-    }) if "index" in df.columns or "date" in df.columns else df
+    # ✅ Handle Datetime cleanly from index
+    if df.index.name is None or df.index.name.lower() != "datetime":
+        df.index.name = "Datetime"
+
+    df.reset_index(inplace=True)
+
+    # ✅ Ensure all column names are clean
+    df.columns = [str(col) for col in df.columns]
 
     if "Datetime" not in df.columns:
-        df.insert(0, "Datetime", pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='1min'))
+        raise ValueError("Datetime column is missing after reset_index.")
 
     df["Datetime"] = pd.to_datetime(df["Datetime"])
-    df = df[["Datetime", "Open", "High", "Low", "Close", "Volume"]]  # Drop any extra columns
+    df["Datetime"] = df["Datetime"].dt.strftime("%Y-%m-%d %H:%M")
 
-    recent_data = df.tail(30).copy()
-    recent_data["Datetime"] = recent_data["Datetime"].astype(str)  # Ensure strings
-    candle_data = recent_data.to_dict(orient="records")  # ✅ This guarantees proper JSON format
+    required_cols = ["Datetime", "Open", "High", "Low", "Close", "Volume"]
+    missing = set(required_cols) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    recent_data = df[required_cols].tail(30)
+    candle_data = recent_data.to_dict(orient="records")  # ✅ JSON-safe
 
     market_regime = determine_market_regime(df)
     atr = calculate_atr(df)
