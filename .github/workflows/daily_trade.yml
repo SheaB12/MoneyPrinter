@@ -2,24 +2,31 @@ name: Daily GPT-Powered SPY Trade
 
 on:
   schedule:
-    - cron: '30 13 * * 1-5'  # 9:30 AM EST Monday through Friday
-  workflow_dispatch:        # Also allow manual trigger
+    - cron: '30 13 * * 1-5'  # Runs at 9:30 AM EST Monday–Friday
+  workflow_dispatch:
 
 jobs:
   daily-trade:
     runs-on: ubuntu-latest
-
+    env:
+      TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+      TRADIER_ACCOUNT_ID: ${{ secrets.TRADIER_ACCOUNT_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
     steps:
-      - name: 📦 Checkout Repo
+      - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: 📚 Install Dependencies
+      - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      - name: 💸 Run Money Printer Trade Executor
-        run: python trade_executor.py
+      - name: Decode Google Sheets Credentials
+        run: echo "${{ secrets.GOOGLE_SHEETS_JSON }}" | base64 --decode > google_sheets.json
+
+      - name: Run Daily Trade
+        run: python monolith.py run
