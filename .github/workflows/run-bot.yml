@@ -24,6 +24,10 @@ jobs:
           echo "$GSHEETS_KEY_B64" | base64 -d > google_sheets.json
           echo "✅ google_sheets.json created"
 
+      - name: 🔎 Debug google_sheets.json (sanitized)
+        run: |
+         head -n 10 google_sheets.json || echo "File missing or malformed"
+          
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
