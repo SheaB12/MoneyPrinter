@@ -1,28 +1,28 @@
-import numpy as np
 import pandas as pd
 
-def detect_market_regime(df):
+def detect_market_regime(df: pd.DataFrame) -> str:
     """
-    Detects if the market is trending or choppy based on SPY 1-minute candles.
-
-    Returns:
-        str: 'TRENDING' or 'CHOPPY'
+    Classifies the market regime as 'trending' or 'choppy' based on rolling returns.
     """
-
     df = df.copy()
-    df['returns'] = df['Close'].pct_change()
-    rolling_vol = df['returns'].rolling(window=10).std()
+    df["returns"] = df["Close"].pct_change()
+    rolling_std = df["returns"].rolling(window=20).std()
 
-    volatility_threshold = 0.002  # Can be tuned
+    recent_volatility = rolling_std.iloc[-1]
+    if recent_volatility > 0.005:
+        return "trending"
+    else:
+        return "choppy"
 
-    # Compute trend strength
-    df['trend_strength'] = np.abs(df['Close'].diff().rolling(window=10).mean())
-
-    trend_threshold = df['Close'].mean() * 0.0015  # Relative to price
-
-    is_trending = (
-        df['trend_strength'].iloc[-1] > trend_threshold
-        and rolling_vol.iloc[-1] > volatility_threshold
-    )
-
-    return "TRENDING" if is_trending else "CHOPPY"
+def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """
+    Calculates the Average True Range (ATR) for the given DataFrame.
+    """
+    df = df.copy()
+    df['H-L'] = df['High'] - df['Low']
+    df['H-PC'] = abs(df['High'] - df['Close'].shift(1))
+    df['L-PC'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(window=period).mean()
+    
+    return round(df['ATR'].iloc[-1], 4)
