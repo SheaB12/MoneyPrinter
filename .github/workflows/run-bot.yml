@@ -18,6 +18,9 @@ jobs:
       - name: ✅ Checkout repo
         uses: actions/checkout@v4
 
+      - name: Decode Google Sheets JSON key
+        run: echo "${{ secrets.GSHEETS_KEY_B64 }}" | base64 -d > google_sheets.json
+
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
