@@ -1,95 +1,67 @@
 import os
 import json
+import openai
 import pandas as pd
-from openai import OpenAI
-from logger import get_recent_logs
-from strategy import detect_market_regime, calculate_atr
+from datetime import datetime
+from logger import get_recent_logs, log_trade_decision
 from alerts import send_threshold_change_alert
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Set up OpenAI key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Path for saving the last confidence threshold
-last_threshold_path = "last_confidence_threshold.txt"
+def gpt_decision(df: pd.DataFrame) -> dict:
+    # Ensure 'Datetime' exists and is properly formatted
+    if df.index.name is not None:
+        df = df.reset_index()
 
-def get_last_confidence_threshold():
-    try:
-        with open(last_threshold_path, "r") as f:
-            return float(f.read())
-    except:
-        return 0.60  # Default fallback
-
-def save_confidence_threshold(threshold):
-    with open(last_threshold_path, "w") as f:
-        f.write(str(threshold))
-
-def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
-    win_rate = (
-        recent_logs_df['Status'].str.lower().eq("win").sum() / len(recent_logs_df)
-        if len(recent_logs_df) > 0 else 0.5
-    )
-    avg_conf = sum(conf_list) / len(conf_list) if conf_list else 0.6
-    base = 0.6
-    threshold = base + ((win_rate - 0.5) * 0.2) + ((atr - 1.5) * 0.02) + ((avg_conf - 0.6) * 0.1)
-    return max(0.5, min(threshold, 0.85))
-
-def gpt_decision(df: pd.DataFrame):
-    df = df.reset_index()
-
-    # Handle datetime column safely
-    datetime_col = df.columns[0]
-    if datetime_col not in df.columns:
+    if "Datetime" not in df.columns:
         raise ValueError("Datetime column is missing after reset_index.")
 
-    df = df.rename(columns={datetime_col: "Datetime"})
     df["Datetime"] = pd.to_datetime(df["Datetime"])
 
-    # Prepare data for GPT prompt
-    recent_data = df.tail(30)
-    candle_data = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].copy()
-    candle_data["Datetime"] = candle_data["Datetime"].astype(str)
-    candle_records = candle_data.to_dict(orient="records")
-
-    market_regime = detect_market_regime(df)
-    atr = calculate_atr(df)
-
-    logs_df = get_recent_logs()  # No limit arg needed now
-    recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
-    dynamic_threshold = calculate_dynamic_threshold(logs_df, atr, recent_confs)
-    last_threshold = get_last_confidence_threshold()
-
-    # Send alert if threshold changes significantly
-    if abs(dynamic_threshold - last_threshold) >= 0.05:
-        send_threshold_change_alert(dynamic_threshold, last_threshold)
-        save_confidence_threshold(dynamic_threshold)
-
-    prompt = (
-        "You're a stock trading AI that analyzes SPY chart data. "
-        f"The current market regime is: {market_regime}. "
-        "Decide whether to BUY CALL, BUY PUT, or SKIP, and explain your reasoning clearly.\n\n"
-        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}\n\n"
-        "Your answer must be JSON formatted like this:\n"
-        '{ "decision": "CALL", "confidence": 0.78, "reason": "Clear uptrend with strong volume" }'
-    )
+    # Get last 30 minutes of data
+    recent_data = df.tail(30).copy()
+    recent_data.reset_index(drop=True, inplace=True)
+    candle_records = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].copy()
+    candle_records["Datetime"] = candle_records["Datetime"].astype(str)
+    candle_json = candle_records.to_dict(orient="records")
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        content = response.choices[0].message.content.strip()
-        parsed = json.loads(content)
-
-        if all(k in parsed for k in ["decision", "confidence", "reason"]):
-            parsed["threshold"] = round(dynamic_threshold, 2)
-            return parsed
-        else:
-            raise ValueError("Missing keys in GPT response.")
-
+        recent_logs = get_recent_logs(limit=10)
     except Exception as e:
-        return {
-            "decision": "SKIP",
-            "confidence": 0.0,
-            "reason": f"Failed to parse GPT output. Error: {str(e)}",
-            "threshold": round(dynamic_threshold, 2)
-        }
+        print(f"Error fetching recent logs: {e}")
+        recent_logs = []
+
+    prompt = (
+        "You are a trading assistant. Based on recent SPY 1-minute candles, decide whether to enter a call, put, or skip.\n\n"
+        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_json)}\n\n"
+        f"Recent decisions and outcomes:\n\n{recent_logs}\n\n"
+        "Return your decision in this JSON format ONLY:\n"
+        '{"action": "call" | "put" | "skip", "confidence": float from 0 to 100, "reason": "..."}'
+    )
+
+    print("📡 Sending prompt to GPT...")
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a disciplined financial trading assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
+    )
+
+    reply = response.choices[0].message['content'].strip()
+
+    print("🤖 GPT replied:")
+    print(reply)
+
+    try:
+        decision_data = json.loads(reply)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse GPT response: {reply}") from e
+
+    # Log decision
+    log_trade_decision(decision_data)
+
+    return decision_data
