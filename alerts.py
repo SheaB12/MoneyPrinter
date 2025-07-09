@@ -1,32 +1,28 @@
 import os
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-def send_discord_alert(content):
+def send_discord_alert(message):
     if not WEBHOOK_URL:
         raise EnvironmentError("DISCORD_WEBHOOK_URL is not set.")
-    
-    payload = {
-        "content": content
-    }
-
-    response = requests.post(WEBHOOK_URL, json=payload)
-    if response.status_code != 204:
-        print(f"❌ Discord alert failed: {response.text}")
+    payload = {"content": message}
+    requests.post(WEBHOOK_URL, json=payload)
 
 def format_discord_message(decision, status):
-    emoji = "📈" if decision["decision"] == "CALL" else "📉"
-    status_emoji = "✅" if status == "EXECUTED" else "⚠️"
-
+    emoji = "✅" if status == "EXECUTED" else "⚠️"
     return (
-        f"{emoji} **Decision:** {decision['decision']}\n"
-        f"🎯 **Confidence:** {round(decision['confidence'] * 100, 2)}%\n"
-        f"🗒️ **Reason:** {decision['reason']}\n"
-        f"{status_emoji} **Status:** {status}"
+        f"🪩 **Decision**: `{decision['decision'].upper()}`\n"
+        f"✅ **Confidence**: `{decision['confidence'] * 100:.2f}%`\n"
+        f"💬 **Reason**: {decision['reason']}\n"
+        f"{emoji} **Status**: {status}"
     )
 
-def alert_threshold_change(message):
-    send_discord_alert(f"📢 **Threshold Update**\n{message}")
+def alert_threshold_change(new, old):
+    diff = (new - old) * 100
+    emoji = "📊"
+    send_discord_alert(
+        f"{emoji} **Threshold Change Alert**\n"
+        f"Old: `{old * 100:.2f}%` → New: `{new * 100:.2f}%`\n"
+        f"Change: `{diff:+.2f}%`"
+    )
