@@ -1,16 +1,39 @@
 import os
 import pandas as pd
+import datetime as dt
+import random
 from gpt_decider import gpt_decision
-from data_loader import load_spy_data  # Assumes you have a data loader function
-from trade_executor import execute_trade  # Optional: used if you want to act on decision
 
 CONFIDENCE_THRESHOLD = 60
+
+def load_spy_data():
+    """
+    Mock function to simulate last 30 minutes of SPY 1-minute candles.
+    Replace with real data fetching later.
+    """
+    now = dt.datetime.now()
+    data = []
+
+    for i in range(30):
+        time = now - dt.timedelta(minutes=30 - i)
+        price = 445 + random.uniform(-1, 1)
+        candle = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "open": price - 0.1,
+            "high": price + 0.2,
+            "low": price - 0.2,
+            "close": price,
+            "volume": random.randint(500000, 1000000)
+        }
+        data.append(candle)
+
+    return pd.DataFrame(data)
 
 def run():
     print("📈 Fetching SPY...")
 
     try:
-        df = load_spy_data()  # This function should return a pandas DataFrame
+        df = load_spy_data()
     except Exception as e:
         print(f"❌ Error loading SPY data: {e}")
         return
@@ -31,9 +54,8 @@ def run():
         print("\n⚠️ No Trade")
         return
 
-    # Optional: call execute_trade if you're ready to place trades directly
-    # print("\n🚀 Executing trade...")
-    # execute_trade(action, decision)
+    print("\n🚀 Trade would be placed here (mocked).")
+    # Optional: call execute_trade(action, decision) if you want real trading logic
 
 if __name__ == "__main__":
     run()
