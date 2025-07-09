@@ -10,6 +10,7 @@ jobs:
       TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
       TRADIER_ACCOUNT_ID: ${{ secrets.TRADIER_ACCOUNT_ID }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_SHEETS_KEY_B64: ${{ secrets.GOOGLE_SHEETS_KEY_B64 }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
