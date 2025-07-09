@@ -16,23 +16,27 @@ def gpt_decision(df: pd.DataFrame) -> dict:
     Send last 30 minutes of SPY 1-min candles to GPT for trade decision.
     Returns a dict with direction, confidence, and reason.
     """
-    # Take last 30 minutes
+    # Take last 30 rows
     df = df.tail(30).copy()
 
-    # Reset index to remove tuple/datetime indexing and treat timestamp as column
-    df = df.reset_index()
+    # Fully reset index to flatten structure and avoid tuple keys
+    df.reset_index(inplace=True)
 
-    # Rename timestamp column for clarity and JSON safety
+    # Rename index to Datetime if needed
     if "Datetime" not in df.columns:
-        df.rename(columns={"index": "Datetime"}, inplace=True)
+        if "index" in df.columns:
+            df.rename(columns={"index": "Datetime"}, inplace=True)
 
-    # Ensure timestamp is a string
-    df["Datetime"] = df["Datetime"].astype(str)
+    # Convert datetime to string format
+    df["Datetime"] = pd.to_datetime(df["Datetime"]).dt.strftime('%Y-%m-%d %H:%M')
 
-    # Convert to list of dicts for safe JSON serialization
+    # Drop any columns with tuple keys just in case
+    df.columns = [str(col) if not isinstance(col, tuple) else "_".join(map(str, col)) for col in df.columns]
+
+    # Convert to JSON-safe dict format
     candle_data = df.to_dict(orient="records")
 
-    # Prompt to GPT
+    # GPT prompt
     prompt = (
         "You're a professional SPY options trading assistant. Based on the following 30 minutes of 1-minute SPY data "
         "(datetime, open, high, low, close, volume), determine if the next 30 minutes favor a CALL or PUT. "
@@ -55,11 +59,8 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         )
 
         content = response.choices[0].message.content.strip()
-
-        # Try parsing GPT response
         decision = json.loads(content)
 
-        # Validate and return
         if (
             "direction" in decision
             and decision["direction"] in ("CALL", "PUT")
