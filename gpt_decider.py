@@ -6,10 +6,8 @@ from logger import get_recent_logs
 from strategy import determine_market_regime, calculate_atr
 from alerts import send_threshold_change_alert
 
-# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Confidence threshold tracking
 last_threshold_path = "last_confidence_threshold.txt"
 
 def get_last_confidence_threshold():
@@ -17,7 +15,7 @@ def get_last_confidence_threshold():
         with open(last_threshold_path, "r") as f:
             return float(f.read())
     except:
-        return 0.60  # Default
+        return 0.60
 
 def save_confidence_threshold(threshold):
     with open(last_threshold_path, "w") as f:
@@ -31,17 +29,16 @@ def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
     )
     avg_conf = sum(conf_list) / len(conf_list) if conf_list else 0.6
     base = 0.6
-
     threshold = base + ((win_rate - 0.5) * 0.2) + ((atr - 1.5) * 0.02) + ((avg_conf - 0.6) * 0.1)
     return max(0.5, min(threshold, 0.85))
 
 def gpt_decision(df: pd.DataFrame):
     df = df.copy().reset_index()
 
-    # Rename index column to 'Datetime' if needed
-    if "index" in df.columns:
-        df.rename(columns={"index": "Datetime"}, inplace=True)
-    elif "Datetime" not in df.columns:
+    # ✅ Flatten multi-index column names to plain strings
+    df.columns = [str(col) if not isinstance(col, str) else col for col in df.columns]
+
+    if "Datetime" not in df.columns:
         raise ValueError("Datetime column is missing after reset_index.")
 
     df["Datetime"] = pd.to_datetime(df["Datetime"])
