@@ -1,60 +1,50 @@
 import os
-import json
-import datetime
 import yfinance as yf
+import pandas as pd
 from gpt_decider import gpt_decision
 from logger import log_to_sheet
 from alerts import send_discord_alert
-from strategy import determine_market_regime
-from threshold import calculate_dynamic_threshold
+from datetime import datetime
 
-def fetch_spy_data():
-    df = yf.download("SPY", interval="1m", period="1d", progress=False)
-    df.reset_index(inplace=True)
-    df = df[["Datetime", "Open", "High", "Low", "Close", "Volume"]]
-    return df.tail(30)
+def log_gpt_decision(decision, status):
+    log_to_sheet([
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        decision["decision"],
+        round(decision["confidence"], 2),
+        status,
+        decision["reason"]  # ✅ Include GPT commentary
+    ])
 
 def format_discord_message(decision, status):
     return (
-        f"🪩 **Decision:** {decision['direction'].upper()}\n"
-        f"✅ **Confidence:** {decision['confidence'] * 100:.2f}%\n"
-        f"💬 **Reason:** {decision['reason']}\n"
-        f"📊 **Status:** {status}"
+        f"**🎯 GPT Trade Decision**\n\n"
+        f"**Action**: `{decision['decision']}`\n"
+        f"**Confidence**: `{round(decision['confidence'] * 100)}%`\n"
+        f"**Status**: `{status}`\n"
+        f"**Threshold**: `{round(decision['threshold'] * 100)}%`\n"
+        f"**Reason**: {decision['reason']}"
     )
 
-def log_gpt_decision(decision, status):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_to_sheet([
-        timestamp,
-        decision["direction"],
-        decision["confidence"],
-        status,
-        decision["reason"]  # ✅ GPT reasoning logged
-    ])
-
 def run():
-    print("\n📈 Fetching SPY...\n")
-    data = fetch_spy_data()
+    print("\n📈 Fetching SPY...")
+    df = yf.download("SPY", interval="1m", period="1d", progress=False)
 
-    print("🧠 GPT making decision...\n")
-    decision = gpt_decision(data)
+    if df.empty:
+        print("⚠️ No data fetched.")
+        return
 
-    market_regime = determine_market_regime(data)
-    decision["market_regime"] = market_regime
+    df = df.reset_index().rename(columns={"index": "Datetime"})
+    df["Datetime"] = pd.to_datetime(df["Datetime"])
 
-    dynamic_threshold, threshold_changed = calculate_dynamic_threshold()
+    print("\n🧠 GPT making decision...")
+    decision = gpt_decision(df)
 
-    confidence = decision["confidence"]
-    status = "EXECUTED" if confidence >= dynamic_threshold else "SKIPPED"
+    if decision["decision"].upper() not in ["CALL", "PUT"]:
+        status = "SKIPPED"
+    else:
+        status = "PENDING"
 
-    if threshold_changed:
-        send_discord_alert(f"⚠️ **Confidence Threshold Updated:**\nNew threshold = {dynamic_threshold*100:.1f}%")
-
-    print(f"\n🪩 Decision: {decision['direction'].upper()}")
-    print(f"✅ Confidence: {confidence * 100:.2f}%")
-    print(f"💬 Reason: {decision['reason']}")
-    print(f"\n{'✅ TRADE PLACED' if status == 'EXECUTED' else '⚠️ No Trade'}")
-
+    print(f"\n🪩 Decision: {decision['decision'].upper()} @ {round(decision['confidence'] * 100)}%")
     log_gpt_decision(decision, status)
     send_discord_alert(format_discord_message(decision, status))
 
