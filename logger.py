@@ -1,45 +1,58 @@
-import os
-import base64
-import json
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
-import pandas as pd
+import os
 
-SPREADSHEET_NAME = "Money Printer Logs"
-SHEET_NAME = "Decisions"
+# Setup Google Sheets connection
+def get_gsheet_client():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_sheets.json")
+    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+    return gspread.authorize(creds)
 
-def load_gsheets_client():
-    key_b64 = os.getenv("GOOGLE_SHEETS_KEY_B64")
-    if not key_b64:
-        raise ValueError("GOOGLE_SHEETS_KEY_B64 environment variable is not set.")
-
+# Log a trade result to the Google Sheet
+def log_trade_result(result: dict):
     try:
-        key_json = base64.b64decode(key_b64).decode()
-        creds_dict = json.loads(key_json)
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        return gspread.authorize(creds)
-    except Exception as e:
-        raise RuntimeError(f"Error loading Google Sheets credentials: {e}")
+        client = get_gsheet_client()
+        sheet = client.open("MoneyPrinter Log").worksheet("Trades")
 
-def log_to_sheet(row):
-    try:
-        client = load_gsheets_client()
-        sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
-        sheet.append_row(row, value_input_option="USER_ENTERED")
-        print("📄 Logged to Google Sheet.")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [
+            now,
+            result.get("action", ""),
+            result.get("confidence", 0),
+            result.get("status", ""),
+            result.get("pnl", 0),
+            result.get("reason", "")
+        ]
+        sheet.append_row(row)
     except Exception as e:
-        print(f"⚠️ Logging failed: {e}")
+        print(f"Logging Error: {e}")
 
-def get_recent_logs(limit=20):
+# ✅ NEW: Log GPT decision separately
+def log_trade_decision(decision: dict):
     try:
-        client = load_gsheets_client()
-        sheet = client.open(SPREADSHEET_NAME).worksheet(SHEET_NAME)
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        df = df.tail(limit)
-        return df
+        client = get_gsheet_client()
+        sheet = client.open("MoneyPrinter Log").worksheet("Decisions")
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [
+            now,
+            decision.get("action", ""),
+            decision.get("confidence", 0),
+            decision.get("reason", "")
+        ]
+        sheet.append_row(row)
     except Exception as e:
-        print(f"Error fetching recent logs: {e}")
-        return pd.DataFrame()
+        print(f"Decision Logging Error: {e}")
+
+# Optional: Fetch recent logs if needed by GPT or stats
+def get_recent_logs(limit=10):
+    try:
+        client = get_gsheet_client()
+        sheet = client.open("MoneyPrinter Log").worksheet("Trades")
+        records = sheet.get_all_records()
+        return records[-limit:]
+    except Exception as e:
+        print(f"Error fetching logs: {e}")
+        return []
