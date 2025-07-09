@@ -2,65 +2,58 @@ import os
 import time
 import yfinance as yf
 import pandas as pd
+from datetime import datetime
 from gpt_decider import gpt_decision
-from alerts import send_discord_alert
 from logger import log_to_sheet
+from execution import execute_trade
+from alerts import send_trade_alert
+from strategy import determine_market_regime
 
 def run():
     print("\n📈 Fetching SPY...\n")
     df = yf.download("SPY", interval="1m", period="1d", progress=False)
+    df = df.copy()
+
+    # Reset index and ensure datetime column is correctly named
+    df.reset_index(inplace=True)
+    if "index" in df.columns:
+        df.rename(columns={"index": "Datetime"}, inplace=True)
+    elif "Date" in df.columns:
+        df.rename(columns={"Date": "Datetime"}, inplace=True)
+    elif "Datetime" not in df.columns:
+        raise ValueError("❌ Could not locate a datetime column after reset.")
 
     if df.empty:
-        print("❌ No SPY data fetched.")
-        return
-
-    df = df.copy()
-    df.reset_index(inplace=True)
-
-    # Rename the datetime column to match expectations
-    if 'Datetime' not in df.columns and 'index' in df.columns:
-        df.rename(columns={"index": "Datetime"}, inplace=True)
-    elif 'Date' in df.columns:
-        df.rename(columns={"Date": "Datetime"}, inplace=True)
-
-    # Ensure all required columns exist
-    required_columns = ['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']
-    for col in required_columns:
-        if col not in df.columns:
-            print(f"❌ Missing column: {col}")
-            return
+        raise ValueError("❌ No SPY data returned from yfinance.")
 
     print("\n🧠 GPT making decision...\n")
     decision_data = gpt_decision(df)
 
-    direction = decision_data.get("decision", "SKIP").upper()
-    confidence = round(float(decision_data.get("confidence", 0.0)), 2)
-    reason = decision_data.get("reason", "No reasoning provided.")
-    threshold = round(float(decision_data.get("threshold", 0.6)), 2)
+    direction = decision_data["decision"].upper()
+    confidence = float(decision_data["confidence"])
+    reason = decision_data.get("reason", "No reason provided.")
+    threshold = decision_data.get("threshold", 0.60)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    timestamp = pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    # Log and alert GPT's decision
+    status = "PENDING"
+    row = [timestamp, direction, round(confidence, 2), status, reason]
+    log_to_sheet(row)
 
-    # Assign trade status (simulate result for now)
-    if direction in ["CALL", "PUT"]:
-        status = "PENDING"  # Placeholder for live result later
-        color = 0x3498db
-    else:
-        status = "SKIPPED"
-        color = 0x95a5a6
+    print(f"🤖 GPT Decision: {direction} (Confidence: {confidence:.2f}, Threshold: {threshold:.2f})")
+    print(f"📌 Reason: {reason}")
 
-    # Log to Google Sheets
-    log_to_sheet([timestamp, direction, confidence, status, reason])
+    if direction == "SKIP" or confidence < threshold:
+        print(f"\n⛔ Skipping trade (confidence {confidence:.2f} < threshold {threshold:.2f})")
+        return
+
+    # Execute simulated trade
+    print("\n🚀 Executing trade...")
+    result = execute_trade(direction)
+    print(f"\n✅ Trade Executed: {result}")
 
     # Send Discord alert
-    send_discord_alert(
-        title=f"🤖 GPT Decision: {direction}",
-        description=(
-            f"**Confidence:** {confidence:.2f} (Threshold: {threshold:.2f})\n"
-            f"**Status:** {status}\n"
-            f"**Reason:** {reason}"
-        ),
-        color=color
-    )
+    send_trade_alert(direction, confidence, reason, threshold)
 
 if __name__ == "__main__":
     run()
