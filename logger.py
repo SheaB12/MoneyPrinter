@@ -4,6 +4,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 google_key = os.getenv("GOOGLE_SHEETS_KEY_B64")
+if google_key is None:
+    raise ValueError("GOOGLE_SHEETS_KEY_B64 environment variable is not set. Check GitHub Actions config.")
 
 import base64
 import json
