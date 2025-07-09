@@ -1,21 +1,17 @@
 import os
 import pandas as pd
-import datetime as dt
+import datetime
 import random
 from gpt_decider import gpt_decision
+from logger import log_to_sheet
 
 CONFIDENCE_THRESHOLD = 60
 
 def load_spy_data():
-    """
-    Mock function to simulate last 30 minutes of SPY 1-minute candles.
-    Replace with real data fetching later.
-    """
-    now = dt.datetime.now()
+    now = datetime.datetime.now()
     data = []
-
     for i in range(30):
-        time = now - dt.timedelta(minutes=30 - i)
+        time = now - datetime.timedelta(minutes=30 - i)
         price = 445 + random.uniform(-1, 1)
         candle = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -26,8 +22,17 @@ def load_spy_data():
             "volume": random.randint(500000, 1000000)
         }
         data.append(candle)
-
     return pd.DataFrame(data)
+
+def log_gpt_decision(decision: dict, action_taken: str):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_to_sheet([
+        timestamp,
+        decision.get("decision", "skip"),
+        decision.get("confidence", 0),
+        decision.get("reason", "No reason provided"),
+        action_taken
+    ])
 
 def run():
     print("📈 Fetching SPY...")
@@ -52,10 +57,11 @@ def run():
 
     if action.lower() == "skip" or confidence < CONFIDENCE_THRESHOLD:
         print("\n⚠️ No Trade")
+        log_gpt_decision(decision, "SKIPPED")
         return
 
     print("\n🚀 Trade would be placed here (mocked).")
-    # Optional: call execute_trade(action, decision) if you want real trading logic
+    log_gpt_decision(decision, "TRADE")
 
 if __name__ == "__main__":
     run()
