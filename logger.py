@@ -1,14 +1,14 @@
 import os
 import gspread
+import base64
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 google_key = os.getenv("GOOGLE_SHEETS_KEY_B64")
-if google_key is None:
-    raise ValueError("GOOGLE_SHEETS_KEY_B64 environment variable is not set. Check GitHub Actions config.")
 
-import base64
-import json
+if not google_key:
+    raise ValueError("GOOGLE_SHEETS_KEY_B64 environment variable is not set. Check GitHub Actions config.")
 
 creds_dict = json.loads(base64.b64decode(google_key))
 credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -29,6 +29,16 @@ def get_or_create_sheet(sheet_name, tab_name, headers):
     return sheet
 
 def log_to_sheet(row_data):
-    headers = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]  # ✅ Reason included
+    headers = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]
     sheet = get_or_create_sheet(SHEET_NAME, "GPT Decisions", headers)
     sheet.append_row(row_data)
+
+def get_recent_logs(n=30):
+    """Fetch last n rows from the GPT Decisions tab."""
+    try:
+        sheet = client.open(SHEET_NAME).worksheet("GPT Decisions")
+        records = sheet.get_all_records()
+        return records[-n:] if len(records) >= n else records
+    except Exception as e:
+        print(f"Error fetching recent logs: {e}")
+        return []
