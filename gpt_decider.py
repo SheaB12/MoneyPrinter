@@ -6,10 +6,10 @@ from logger import get_recent_logs
 from strategy import determine_market_regime, calculate_atr
 from alerts import send_threshold_change_alert
 
-# ✅ Initialize OpenAI client using environment variable
+# Initialize OpenAI client using environment variable
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ✅ Confidence tracking
+# Confidence tracking
 last_threshold_path = "last_confidence_threshold.txt"
 
 def get_last_confidence_threshold():
@@ -37,51 +37,37 @@ def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
     return max(0.5, min(threshold, 0.85))
 
 def gpt_decision(df: pd.DataFrame):
-    # ✅ Prepare DataFrame
+    # ✅ Ensure datetime column is handled correctly
     df = df.copy()
-    df.reset_index(inplace=True)
-    
-    # Handle datetime
-    if "index" in df.columns:
-        df.rename(columns={"index": "Datetime"}, inplace=True)
-    elif "Datetime" not in df.columns:
-        df.insert(0, "Datetime", pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='T'))
 
+    if "Datetime" not in df.columns:
+        df.reset_index(inplace=True)
+        if "index" in df.columns:
+            df.rename(columns={"index": "Datetime"}, inplace=True)
+
+    df = df.loc[:, ~df.columns.duplicated()]
     df["Datetime"] = pd.to_datetime(df["Datetime"])
     df["Datetime"] = df["Datetime"].dt.strftime('%Y-%m-%d %H:%M')
 
-    # Flatten all column names to strings
-    df.columns = [str(c) for c in df.columns]
-
-    # Ensure required columns
-    required_cols = ["Datetime", "Open", "High", "Low", "Close", "Volume"]
-    missing_cols = [col for col in required_cols if col not in df.columns]
-    if missing_cols:
-        raise KeyError(f"Missing expected columns: {missing_cols}")
-
     recent_data = df.tail(30)
-    candle_data = recent_data[required_cols].to_dict(orient="records")
-
-    # ✅ Determine market regime and indicators
+    candle_data = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
     market_regime = determine_market_regime(df)
-    atr = calculate_atr(df)
 
+    atr = calculate_atr(df)
     try:
         logs_df = get_recent_logs()
     except Exception as e:
         print("Error fetching recent logs:", e)
-        logs_df = pd.DataFrame(columns=["Confidence", "Status"])
+        logs_df = pd.DataFrame()
 
     recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
     dynamic_threshold = calculate_dynamic_threshold(logs_df, atr, recent_confs)
     last_threshold = get_last_confidence_threshold()
 
-    # ✅ Alert on significant threshold change
     if abs(dynamic_threshold - last_threshold) >= 0.05:
         send_threshold_change_alert(dynamic_threshold, last_threshold)
         save_confidence_threshold(dynamic_threshold)
 
-    # ✅ Compose GPT prompt
     prompt = (
         "You're a stock trading AI that analyzes SPY chart data. "
         f"The current market regime is: {market_regime}. "
@@ -91,7 +77,6 @@ def gpt_decision(df: pd.DataFrame):
         '{ "decision": "CALL", "confidence": 0.78, "reason": "Clear uptrend with strong volume" }'
     )
 
-    # ✅ Get GPT response
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -101,7 +86,6 @@ def gpt_decision(df: pd.DataFrame):
         content = response.choices[0].message.content.strip()
         parsed = json.loads(content)
 
-        # Validate response fields
         if all(k in parsed for k in ["decision", "confidence", "reason"]):
             parsed["threshold"] = round(dynamic_threshold, 2)
             return parsed
