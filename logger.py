@@ -1,7 +1,8 @@
 import os
-import gspread
 import base64
 import json
+import gspread
+import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -33,12 +34,9 @@ def log_to_sheet(row_data):
     sheet = get_or_create_sheet(SHEET_NAME, "GPT Decisions", headers)
     sheet.append_row(row_data)
 
-def get_recent_logs(n=30):
-    """Fetch last n rows from the GPT Decisions tab."""
-    try:
-        sheet = client.open(SHEET_NAME).worksheet("GPT Decisions")
-        records = sheet.get_all_records()
-        return records[-n:] if len(records) >= n else records
-    except Exception as e:
-        print(f"Error fetching recent logs: {e}")
-        return []
+def get_recent_logs(limit=20):
+    headers = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]
+    sheet = get_or_create_sheet(SHEET_NAME, "GPT Decisions", headers)
+    data = sheet.get_all_values()[1:]  # Skip header
+    df = pd.DataFrame(data, columns=headers)
+    return df.tail(limit)
