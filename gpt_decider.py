@@ -3,13 +3,13 @@ import json
 import pandas as pd
 from openai import OpenAI
 from logger import get_recent_logs
-from strategy import detect_market_regime, calculate_atr
+from strategy import determine_market_regime, calculate_atr
 from alerts import send_threshold_change_alert
 
 # Initialize OpenAI client using environment variable
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Confidence tracking file
+# Confidence tracking
 last_threshold_path = "last_confidence_threshold.txt"
 
 def get_last_confidence_threshold():
@@ -38,19 +38,30 @@ def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
 
 def gpt_decision(df: pd.DataFrame):
     df = df.copy().reset_index()
-    df.rename(columns={"index": "Datetime"}, inplace=True)
+
+    # Safely assign 'Datetime'
     if "Datetime" not in df.columns:
-        df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
+        if df.columns[0] != "Datetime":
+            df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
+
+    df = df.loc[:, ~df.columns.duplicated()].copy()
     df["Datetime"] = pd.to_datetime(df["Datetime"])
     df["Datetime"] = df["Datetime"].dt.strftime('%Y-%m-%d %H:%M')
 
     recent_data = df.tail(30)
     candle_data = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
-    market_regime = detect_market_regime(df)
+    
+    market_regime = determine_market_regime(df)
     atr = calculate_atr(df)
 
-    logs_df = get_recent_logs(limit=20)
-    recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
+    try:
+        logs_df = get_recent_logs(limit=20)
+        recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
+    except Exception as e:
+        print("Error fetching recent logs:", e)
+        logs_df = pd.DataFrame()
+        recent_confs = []
+
     dynamic_threshold = calculate_dynamic_threshold(logs_df, atr, recent_confs)
     last_threshold = get_last_confidence_threshold()
 
@@ -59,6 +70,7 @@ def gpt_decision(df: pd.DataFrame):
         send_threshold_change_alert(dynamic_threshold, last_threshold)
         save_confidence_threshold(dynamic_threshold)
 
+    # Build prompt
     prompt = (
         "You're a stock trading AI that analyzes SPY chart data. "
         f"The current market regime is: {market_regime}. "
