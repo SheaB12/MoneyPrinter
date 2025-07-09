@@ -1,72 +1,52 @@
 import gspread
-from datetime import datetime
-from oauth2client.service_account import ServiceAccountCredentials
-import os
-import json
 from google.oauth2.service_account import Credentials
+from datetime import datetime
+import traceback
 
-def load_credentials_from_env():
-    if "GOOGLE_SHEETS_KEY_B64" not in os.environ:
-        raise EnvironmentError("Missing GOOGLE_SHEETS_KEY_B64 in environment variables.")
-    
+# Define your sheet ID and sheet/tab name here
+SHEET_ID = "your_google_sheet_id"  # <- Replace this with your actual Sheet ID
+SHEET_NAME = "Logs"
+
+def get_credentials():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_file("google_sheets.json", scopes=scopes)
+    return creds
+
+def log_trade_decision(decision_data):
     try:
-        decoded_json = json.loads(
-            base64.b64decode(os.environ["GOOGLE_SHEETS_KEY_B64"]).decode("utf-8")
-        )
-        return Credentials.from_service_account_info(decoded_json, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    except Exception as e:
-        raise ValueError(f"Failed to load service account credentials: {e}")
+        creds = get_credentials()
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
 
-# Setup Google Sheets connection
-def get_gsheet_client():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_sheets.json")
-    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-    return gspread.authorize(creds)
-
-# Log a trade result to the Google Sheet
-def log_trade_result(result: dict):
-    try:
-        client = get_gsheet_client()
-        sheet = client.open("MoneyPrinter Log").worksheet("Trades")
-
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Prepare row to append
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         row = [
             now,
-            result.get("action", ""),
-            result.get("confidence", 0),
-            result.get("status", ""),
-            result.get("pnl", 0),
-            result.get("reason", "")
+            decision_data.get("action", ""),
+            decision_data.get("confidence", ""),
+            decision_data.get("reason", ""),
         ]
+
         sheet.append_row(row)
-    except Exception as e:
-        print(f"Logging Error: {e}")
+        print("✅ Decision logged to Google Sheets.")
 
-# ✅ NEW: Log GPT decision separately
-def log_trade_decision(decision: dict):
+    except Exception as e:
+        print("📛 Error while logging to Google Sheets.")
+        traceback.print_exc()
+        print(f"📛 Raw error: {e}")
+
+def get_recent_logs():
     try:
-        client = get_gsheet_client()
-        sheet = client.open("MoneyPrinter Log").worksheet("Decisions")
+        creds = get_credentials()
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = [
-            now,
-            decision.get("action", ""),
-            decision.get("confidence", 0),
-            decision.get("reason", "")
-        ]
-        sheet.append_row(row)
-    except Exception as e:
-        print(f"Decision Logging Error: {e}")
+        rows = sheet.get_all_values()
+        print(f"📋 Fetched {len(rows)} rows from the log.")
+        return rows[-5:] if len(rows) >= 5 else rows
 
-# Optional: Fetch recent logs if needed by GPT or stats
-def get_recent_logs(limit=10):
-    try:
-        client = get_gsheet_client()
-        sheet = client.open("MoneyPrinter Log").worksheet("Trades")
-        records = sheet.get_all_records()
-        return records[-limit:]
     except Exception as e:
-        print(f"Error fetching logs: {e}")
+        print("📛 Error fetching logs:")
+        traceback.print_exc()
+        print(f"📛 Raw error: {e}")
         return []
