@@ -1,23 +1,38 @@
 import os
 import requests
+from datetime import datetime
 
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-def send_discord_alert(message: str):
-    if not WEBHOOK_URL:
-        raise EnvironmentError("DISCORD_WEBHOOK_URL is not set in environment variables.")
-    
+def send_discord_alert(title, description, color=0x3498db):  # Default: blue
+    if not DISCORD_WEBHOOK_URL:
+        print("⚠️ DISCORD_WEBHOOK_URL is not set.")
+        return
+
     payload = {
-        "content": message
+        "embeds": [
+            {
+                "title": title,
+                "description": description,
+                "color": color,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        ]
     }
-    response = requests.post(WEBHOOK_URL, json=payload)
-    if response.status_code != 204:
-        raise Exception(f"Failed to send Discord alert: {response.text}")
 
-def send_threshold_change_alert(new_threshold: float, old_threshold: float):
-    message = (
-        f"⚠️ **Confidence Threshold Changed**\n"
-        f"Old Threshold: `{round(old_threshold, 2)}`\n"
-        f"New Threshold: `{round(new_threshold, 2)}`"
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"❌ Failed to send Discord alert: {e}")
+
+def send_threshold_change_alert(new_threshold, old_threshold):
+    diff = round(abs(new_threshold - old_threshold), 3)
+    color = 0xffa500 if new_threshold > old_threshold else 0x1abc9c  # Orange/Teal
+    title = "⚙️ Confidence Threshold Changed"
+    desc = (
+        f"**Old Threshold:** {old_threshold:.2f}\n"
+        f"**New Threshold:** {new_threshold:.2f}\n"
+        f"**Change:** {diff:.3f}"
     )
-    send_discord_alert(message)
+    send_discord_alert(title, desc, color)
