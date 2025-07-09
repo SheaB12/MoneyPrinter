@@ -1,0 +1,26 @@
+name: 🔐 Encode Google Sheets JSON
+
+on:
+  workflow_dispatch:
+
+jobs:
+  encode-key:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: 🔐 Encode google_sheets.json to base64
+        run: |
+          if [ ! -f "google_sheets.json" ]; then
+            echo "❌ google_sheets.json not found in repo root!"
+            exit 1
+          fi
+
+          echo "✅ Found google_sheets.json. Encoding..."
+          ENCODED=$(base64 -w 0 google_sheets.json)
+          echo ""
+          echo "🔐 Copy and paste the following into GitHub Secrets as GOOGLE_SHEETS_KEY_B64:"
+          echo ""
+          echo "$ENCODED"
