@@ -6,13 +6,18 @@ from datetime import datetime
 from logger import get_recent_logs, log_trade_decision
 from alerts import send_threshold_change_alert
 
-# Set up OpenAI key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Set up OpenAI client using the newer 1.x interface
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def gpt_decision(df: pd.DataFrame) -> dict:
     # Ensure 'Datetime' exists and is properly formatted
     if df.index.name is not None:
         df = df.reset_index()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        # yfinance>=0.2 returns MultiIndex columns even for a single ticker
+        # Drop the ticker level so column names are simple strings
+        df.columns = df.columns.get_level_values(0)
 
     if "Datetime" not in df.columns:
         raise ValueError("Datetime column is missing after reset_index.")
@@ -42,7 +47,7 @@ def gpt_decision(df: pd.DataFrame) -> dict:
 
     print("📡 Sending prompt to GPT...")
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[
             {"role": "system", "content": "You are a disciplined financial trading assistant."},
@@ -51,7 +56,7 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         temperature=0.3
     )
 
-    reply = response.choices[0].message['content'].strip()
+    reply = response.choices[0].message.content.strip()
 
     print("🤖 GPT replied:")
     print(reply)
