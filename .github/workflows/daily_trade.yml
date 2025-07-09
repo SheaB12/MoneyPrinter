@@ -3,7 +3,7 @@ name: Daily Trade Execution
 on:
   workflow_dispatch:
   schedule:
-    - cron: "14 13 * * 1-5" # 9:14 AM EST Monday–Friday
+    - cron: '30 12 * * 1-5'
 
 jobs:
   run-bot:
