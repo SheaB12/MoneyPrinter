@@ -25,7 +25,8 @@ def save_confidence_threshold(threshold):
 
 def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
     win_rate = (
-        recent_logs_df['Status'].str.lower().eq("win").sum() / len(recent_logs_df)
+        recent_logs_df['Status'].str.lower().eq("win").sum()
+        / len(recent_logs_df)
         if len(recent_logs_df) > 0 else 0.5
     )
     avg_conf = sum(conf_list) / len(conf_list) if conf_list else 0.6
@@ -37,15 +38,16 @@ def calculate_dynamic_threshold(recent_logs_df, atr, conf_list):
 
 def gpt_decision(df: pd.DataFrame):
     df = df.copy().reset_index()
+    df.columns = [str(col) for col in df.columns]  # ✅ Fix tuple key issue
     df["Datetime"] = pd.to_datetime(df["Datetime"])
     df["Datetime"] = df["Datetime"].dt.strftime('%Y-%m-%d %H:%M')
 
     recent_data = df.tail(30)
     candle_data = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].to_dict(orient="records")
     market_regime = detect_market_regime(df)
-    atr = calculate_atr(df)
 
-    logs_df = pd.DataFrame(get_recent_logs(n=20))
+    atr = calculate_atr(df)
+    logs_df = get_recent_logs(limit=20)
     recent_confs = logs_df['Confidence'].astype(float).tolist() if not logs_df.empty else []
     dynamic_threshold = calculate_dynamic_threshold(logs_df, atr, recent_confs)
     last_threshold = get_last_confidence_threshold()
@@ -73,6 +75,7 @@ def gpt_decision(df: pd.DataFrame):
         content = response.choices[0].message.content.strip()
         parsed = json.loads(content)
 
+        # Ensure necessary fields
         if all(k in parsed for k in ["decision", "confidence", "reason"]):
             parsed["threshold"] = round(dynamic_threshold, 2)
             return parsed
@@ -83,5 +86,5 @@ def gpt_decision(df: pd.DataFrame):
             "decision": "SKIP",
             "confidence": 0.0,
             "reason": f"Failed to parse GPT output. Error: {str(e)}",
-            "threshold": round(dynamic_threshold, 2)
+            "threshold": dynamic_threshold
         }
