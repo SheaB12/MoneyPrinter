@@ -15,7 +15,7 @@ def fetch_spy_data():
     df = spy.history(interval="1m", period="1d")  # Get full day of 1-min data
     df = df.tail(30)  # Last 30 minutes
     df.reset_index(inplace=True)
-    df['timestamp'] = df['index'].dt.strftime('%Y-%m-%d %H:%M')
+    df['timestamp'] = df['Datetime'].dt.strftime('%Y-%m-%d %H:%M')
     return df
 
 def log_gpt_decision(decision, action):
