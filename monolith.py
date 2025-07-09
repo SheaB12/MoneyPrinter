@@ -1,39 +1,41 @@
 import os
+import time
 import yfinance as yf
-import pandas as pd
 from gpt_decider import gpt_decision
-from logger import log_to_sheet
-from alerts import send_trade_alert
 from execution import execute_trade
-from datetime import datetime
+from alerts import send_trade_alert
+from logger import log_trade_result
 
 def run():
-    print("\n\n📈 Fetching SPY...\n")
+    print("\n📈 Fetching SPY...\n")
     df = yf.download("SPY", interval="1m", period="1d", progress=False)
 
     if df.empty:
-        print("⚠️ Failed to fetch SPY data.")
-        return
+        raise ValueError("No data fetched for SPY. Check internet or API limits.")
 
-    print("\n\n🧠 GPT making decision...\n")
+    print("\n🧠 GPT making decision...\n")
     decision_data = gpt_decision(df)
 
-    direction = decision_data["decision"]
-    confidence = decision_data["confidence"]
-    reason = decision_data["reason"]
-    threshold = decision_data["threshold"]
+    action = decision_data.get("action", "").lower()
+    confidence = float(decision_data.get("confidence", 0.0))
+    reason = decision_data.get("reason", "No reason provided.")
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    status = "Skipped" if direction == "SKIP" or confidence < threshold else "Planned"
+    if action in ["call", "put"]:
+        print(f"\n🚀 Executing {action.upper()} trade...")
+        result = execute_trade(action=action, confidence=confidence)
 
-    log_to_sheet([now, direction, confidence, status, reason])
-    send_trade_alert(direction, confidence, reason, threshold, status)
+        # Log and alert the trade
+        log_trade_result(result)
+        send_trade_alert(
+            action=result["action"],
+            confidence=result["confidence"],
+            status=result["status"],
+            pnl=result["pnl"],
+            reason=reason
+        )
 
-    if direction != "SKIP" and confidence >= threshold:
-        print("🛠 Executing trade...\n")
-        execute_trade(direction, confidence, reason)
     else:
-        print("🚫 No trade executed due to low confidence or SKIP signal.\n")
+        print("⛔ No trade executed. GPT recommended to SKIP.")
 
 if __name__ == "__main__":
     run()
