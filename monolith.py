@@ -1,54 +1,39 @@
 import os
-import time
 import yfinance as yf
-import warnings
-from dotenv import load_dotenv
+import pandas as pd
 from gpt_decider import gpt_decision
-from execution import execute_trade
+from logger import log_to_sheet
 from alerts import send_trade_alert
-from logger import log_trade_decision
-
-# Load environment variables
-load_dotenv()
-warnings.simplefilter(action='ignore', category=FutureWarning)
+from execution import execute_trade
+from datetime import datetime
 
 def run():
-    print("\n📈 Fetching SPY...\n")
-
-    # ✅ Download SPY 1-min data for today
+    print("\n\n📈 Fetching SPY...\n")
     df = yf.download("SPY", interval="1m", period="1d", progress=False)
+
     if df.empty:
-        raise ValueError("SPY data fetch failed or returned empty.")
+        print("⚠️ Failed to fetch SPY data.")
+        return
 
     print("\n\n🧠 GPT making decision...\n")
     decision_data = gpt_decision(df)
 
-    decision = decision_data.get("decision", "SKIP")
-    confidence = decision_data.get("confidence", 0.0)
-    reason = decision_data.get("reason", "")
-    threshold = decision_data.get("threshold", 0.6)
+    direction = decision_data["decision"]
+    confidence = decision_data["confidence"]
+    reason = decision_data["reason"]
+    threshold = decision_data["threshold"]
 
-    print(f"✅ GPT Decision: {decision}")
-    print(f"📊 Confidence: {confidence:.2f} (Threshold: {threshold:.2f})")
-    print(f"🧠 Reason: {reason}")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    status = "Skipped" if direction == "SKIP" or confidence < threshold else "Planned"
 
-    # ✅ Skip trade if confidence is below threshold
-    if decision == "SKIP" or confidence < threshold:
-        print("🚫 Trade skipped due to low confidence or GPT recommendation.")
-        log_trade_decision("SKIP", confidence, threshold, reason, status="skipped")
-        return
+    log_to_sheet([now, direction, confidence, status, reason])
+    send_trade_alert(direction, confidence, reason, threshold, status)
 
-    # ✅ Execute paper trade using Tradier API
-    print("🚀 Placing trade...")
-    result = execute_trade(decision)
-
-    # ✅ Log to Sheets and send Discord alert
-    status = result.get("status", "error")
-    trade_price = result.get("price", "N/A")
-    trade_symbol = result.get("symbol", "N/A")
-
-    log_trade_decision(decision, confidence, threshold, reason, status, symbol=trade_symbol, price=trade_price)
-    send_trade_alert(decision, confidence, threshold, reason, status, symbol=trade_symbol, price=trade_price)
+    if direction != "SKIP" and confidence >= threshold:
+        print("🛠 Executing trade...\n")
+        execute_trade(direction, confidence, reason)
+    else:
+        print("🚫 No trade executed due to low confidence or SKIP signal.\n")
 
 if __name__ == "__main__":
     run()
