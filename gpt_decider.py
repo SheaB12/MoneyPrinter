@@ -1,72 +1,90 @@
-import os
 import json
 import openai
 import pandas as pd
-from datetime import datetime
-from logger import get_recent_logs, log_trade_decision
+from logger import get_sheet, get_recent_logs, log_trade_decision
 from alerts import send_threshold_change_alert
+from strategy import detect_market_regime, calculate_atr
 
-# Set up OpenAI client using the newer 1.x interface
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def gpt_decision(df: pd.DataFrame) -> dict:
-    # Ensure 'Datetime' exists and is properly formatted
-    if df.index.name is not None:
-        df = df.reset_index()
+# Confidence threshold (dynamically modifiable)
+CONFIDENCE_THRESHOLD = 60
 
-    if isinstance(df.columns, pd.MultiIndex):
-        # yfinance>=0.2 returns MultiIndex columns even for a single ticker
-        # Drop the ticker level so column names are simple strings
-        df.columns = df.columns.get_level_values(0)
-
+def gpt_decision(df):
+    df = df.copy()
+    df.reset_index(inplace=True)
+    
     if "Datetime" not in df.columns:
         raise ValueError("Datetime column is missing after reset_index.")
 
     df["Datetime"] = pd.to_datetime(df["Datetime"])
+    df = df.tail(30)
 
-    # Get last 30 minutes of data
-    recent_data = df.tail(30).copy()
-    recent_data.reset_index(drop=True, inplace=True)
-    candle_records = recent_data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].copy()
-    candle_records["Datetime"] = candle_records["Datetime"].astype(str)
-    candle_json = candle_records.to_dict(orient="records")
+    # Convert index to str for JSON serialization
+    df.set_index("Datetime", inplace=True)
+    df.index = df.index.strftime("%Y-%m-%d %H:%M")
+    candle_records = df.to_dict(orient="index")
 
+    # Try to fetch logs
     try:
-        recent_logs = get_recent_logs(limit=10)
+        sheet = get_sheet()
+        logs = get_recent_logs(sheet, tab_name="Results", num_rows=30)
     except Exception as e:
-        print(f"Error fetching recent logs: {e}")
-        recent_logs = []
+        print("Error fetching recent logs:", e)
+        logs = []
+
+    # Determine market regime and ATR
+    regime = detect_market_regime(df)
+    atr = calculate_atr(df)
 
     prompt = (
-        "You are a trading assistant. Based on recent SPY 1-minute candles, decide whether to enter a call, put, or skip.\n\n"
-        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_json)}\n\n"
-        f"Recent decisions and outcomes:\n\n{recent_logs}\n\n"
-        "Return your decision in this JSON format ONLY:\n"
-        '{"action": "call" | "put" | "skip", "confidence": float from 0 to 100, "reason": "..."}'
+        "You are a SPY options trading bot using price action and volume data.\n"
+        f"Market regime: {regime}\n"
+        f"Current ATR: {atr:.2f}\n"
+    )
+
+    if logs:
+        prompt += f"\nHere are recent decisions and their outcomes:\n{logs}\n"
+
+    prompt += (
+        f"\nHere is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}\n\n"
+        "Decide whether to trade a CALL, PUT, or SKIP. "
+        "Respond ONLY with a JSON object using this format:\n"
+        '{"action": "call|put|skip", "confidence": 0-100, "reason": "..."}\n'
     )
 
     print("📡 Sending prompt to GPT...")
-
-    response = client.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a disciplined financial trading assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7
     )
 
-    reply = response.choices[0].message.content.strip()
-
-    print("🤖 GPT replied:")
-    print(reply)
+    content = response['choices'][0]['message']['content']
+    print("🤖 GPT replied:\n")
+    print(content)
 
     try:
-        decision_data = json.loads(reply)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse GPT response: {reply}") from e
+        decision_data = json.loads(content)
+    except json.JSONDecodeError:
+        raise ValueError("GPT response could not be parsed as JSON.")
 
-    # Log decision
-    log_trade_decision(decision_data)
+    # Add logging metadata
+    decision_data["regime"] = regime
+    decision_data["atr"] = atr
+    decision_data["datetime"] = pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M")
+
+    # Log to Google Sheets
+    try:
+        log_trade_decision(decision_data)
+    except Exception as e:
+        print("Decision Logging Error:", e)
+
+    # Dynamic threshold alert (optional advanced feature)
+    global CONFIDENCE_THRESHOLD
+    if decision_data["confidence"] < CONFIDENCE_THRESHOLD:
+        print("⚠️ Confidence below threshold. Skipping.")
+    else:
+        print(f"✅ Decision meets confidence threshold ({CONFIDENCE_THRESHOLD}+)")
 
     return decision_data
