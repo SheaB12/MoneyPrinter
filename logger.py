@@ -1,8 +1,8 @@
 import os
-import base64
-import json
 import gspread
 import pandas as pd
+import base64
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -16,6 +16,8 @@ credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope
 client = gspread.authorize(credentials)
 
 SHEET_NAME = "GPT_Trade_Log"
+TAB_NAME = "GPT Decisions"
+HEADERS = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]
 
 def get_or_create_sheet(sheet_name, tab_name, headers):
     try:
@@ -30,13 +32,15 @@ def get_or_create_sheet(sheet_name, tab_name, headers):
     return sheet
 
 def log_to_sheet(row_data):
-    headers = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]
-    sheet = get_or_create_sheet(SHEET_NAME, "GPT Decisions", headers)
+    sheet = get_or_create_sheet(SHEET_NAME, TAB_NAME, HEADERS)
     sheet.append_row(row_data)
 
-def get_recent_logs(limit=20):
-    headers = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]
-    sheet = get_or_create_sheet(SHEET_NAME, "GPT Decisions", headers)
-    data = sheet.get_all_values()[1:]  # Skip header
-    df = pd.DataFrame(data, columns=headers)
-    return df.tail(limit)
+def get_recent_logs():
+    try:
+        sheet = get_or_create_sheet(SHEET_NAME, TAB_NAME, HEADERS)
+        records = sheet.get_all_records()
+        df = pd.DataFrame(records)
+        return df.tail(20) if not df.empty else pd.DataFrame(columns=HEADERS)
+    except Exception as e:
+        print(f"Error fetching logs from Sheet: {e}")
+        return pd.DataFrame(columns=HEADERS)
