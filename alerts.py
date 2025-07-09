@@ -1,45 +1,59 @@
-import os
 import requests
+import os
+from logger import get_daily_summary
 from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-def send_trade_alert(decision, confidence, reason):
+def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPrinter Alert"):
     if not DISCORD_WEBHOOK_URL:
-        print("⚠️ DISCORD_WEBHOOK_URL not set.")
+        print("❌ DISCORD_WEBHOOK_URL is not set.")
         return
 
-    message = {
-        "embeds": [{
-            "title": f"📈 Trade Signal: {decision}",
-            "description": f"**Confidence:** {confidence:.2f}\n**Reason:** {reason}",
-            "color": 3066993 if decision == "CALL" else 15158332 if decision == "PUT" else 8359053,
-            "timestamp": datetime.utcnow().isoformat()
-        }]
+    data = {
+        "embeds": [
+            {
+                "title": title,
+                "description": message,
+                "color": color,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        ]
     }
 
-    try:
-        requests.post(DISCORD_WEBHOOK_URL, json=message)
+    response = requests.post(DISCORD_WEBHOOK_URL, json=data)
+    if response.status_code != 204:
+        print(f"❌ Discord alert failed: {response.status_code} - {response.text}")
+    else:
         print("✅ Discord alert sent.")
-    except Exception as e:
-        print(f"❌ Failed to send Discord alert: {e}")
 
-def send_threshold_change_alert(new_threshold, old_threshold):
-    if not DISCORD_WEBHOOK_URL:
-        print("⚠️ DISCORD_WEBHOOK_URL not set.")
-        return
 
-    message = {
-        "embeds": [{
-            "title": "📊 Threshold Adjustment",
-            "description": f"**New Threshold:** {new_threshold:.2f}\n**Previous:** {old_threshold:.2f}",
-            "color": 3447003,
-            "timestamp": datetime.utcnow().isoformat()
-        }]
-    }
+def send_trade_alert(action: str, confidence: int, reason: str):
+    color = 0x2ecc71 if action.lower() in ['call', 'put'] else 0xe74c3c
+    message = f"**Action**: `{action.upper()}`\n**Confidence**: `{confidence}%`\n**Reason**: {reason}"
+    send_discord_alert(message, color, title="🤖 GPT Trade Decision")
 
+
+def send_trade_result_alert(symbol: str, pnl: float, win: bool):
+    color = 0x2ecc71 if win else 0xe74c3c
+    result_text = "✅ WIN" if win else "❌ LOSS"
+    message = f"**Symbol**: `{symbol}`\n**PnL**: `{pnl:.2f}%`\n**Result**: {result_text}"
+    send_discord_alert(message, color, title="📈 Trade Result")
+
+
+def send_threshold_change_alert(old: float, new: float):
+    color = 0xf1c40f
+    message = f"🔁 Dynamic confidence threshold changed from `{old}%` → `{new}%`"
+    send_discord_alert(message, color, title="⚙️ Threshold Update")
+
+
+def send_daily_summary():
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=message)
-        print("✅ Threshold change alert sent.")
+        summary = get_daily_summary()
+        if not summary:
+            print("⚠️ No daily summary available to send.")
+            return
+
+        send_discord_alert(summary, color=0x7289DA, title="📅 Daily Performance Summary")
     except Exception as e:
-        print(f"❌ Failed to send threshold alert: {e}")
+        print(f"❌ Error sending daily summary: {e}")
