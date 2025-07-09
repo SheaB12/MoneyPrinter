@@ -1,0 +1,29 @@
+name: Encode Google Sheets JSON
+
+on:
+  workflow_dispatch:
+
+jobs:
+  encode-json:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Encode google_sheets.json to base64
+        run: |
+          if [ ! -f "google_sheets.json" ]; then
+            echo "❌ google_sheets.json not found. Make sure it's in the root directory."
+            exit 1
+          fi
+          echo "✅ Found google_sheets.json. Encoding..."
+          ENCODED=$(base64 -w 0 google_sheets.json)
+          echo "$ENCODED" > encoded_google_sheets.txt
+          echo "✅ Encoded output written to encoded_google_sheets.txt"
+
+      - name: Upload encoded file as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: encoded-google-sheets
+          path: encoded_google_sheets.txt
