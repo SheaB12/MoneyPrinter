@@ -1,10 +1,11 @@
 import os
-import gspread
-import pandas as pd
 import base64
 import json
+import gspread
+from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
+# Setup Google Sheets credentials
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 google_key = os.getenv("GOOGLE_SHEETS_KEY_B64")
 
@@ -17,30 +18,33 @@ client = gspread.authorize(credentials)
 
 SHEET_NAME = "GPT_Trade_Log"
 TAB_NAME = "GPT Decisions"
-HEADERS = ["Timestamp", "Direction", "Confidence", "Status", "Reason"]
 
-def get_or_create_sheet(sheet_name, tab_name, headers):
+HEADERS = ["Timestamp", "Direction", "Confidence", "Threshold", "Reason", "Status", "Symbol", "Price"]
+
+def get_or_create_sheet():
     try:
-        sheet = client.open(sheet_name).worksheet(tab_name)
+        sheet = client.open(SHEET_NAME).worksheet(TAB_NAME)
     except gspread.SpreadsheetNotFound:
-        sheet = client.create(sheet_name).sheet1
-        sheet.update_title(tab_name)
-        sheet.append_row(headers)
+        sheet = client.create(SHEET_NAME).sheet1
+        sheet.update_title(TAB_NAME)
+        sheet.append_row(HEADERS)
     except gspread.WorksheetNotFound:
-        sheet = client.open(sheet_name).add_worksheet(title=tab_name, rows="1000", cols="20")
-        sheet.append_row(headers)
+        sheet = client.open(SHEET_NAME).add_worksheet(title=TAB_NAME, rows="1000", cols="20")
+        sheet.append_row(HEADERS)
     return sheet
 
-def log_to_sheet(row_data):
-    sheet = get_or_create_sheet(SHEET_NAME, TAB_NAME, HEADERS)
-    sheet.append_row(row_data)
+def log_trade_decision(direction, confidence, threshold, reason, status, symbol="N/A", price="N/A"):
+    sheet = get_or_create_sheet()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = [timestamp, direction, round(confidence, 2), round(threshold, 2), reason, status, symbol, price]
+    sheet.append_row(row)
 
 def get_recent_logs():
     try:
-        sheet = get_or_create_sheet(SHEET_NAME, TAB_NAME, HEADERS)
-        records = sheet.get_all_records()
-        df = pd.DataFrame(records)
-        return df.tail(20) if not df.empty else pd.DataFrame(columns=HEADERS)
+        sheet = get_or_create_sheet()
+        data = sheet.get_all_records()
+        import pandas as pd
+        return pd.DataFrame(data).tail(20)
     except Exception as e:
-        print(f"Error fetching logs from Sheet: {e}")
-        return pd.DataFrame(columns=HEADERS)
+        print(f"Error fetching recent logs: {e}")
+        return pd.DataFrame()
