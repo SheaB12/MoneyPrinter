@@ -1,9 +1,9 @@
-name: Run MoneyPrinter $Bot
+name: Run MoneyPrinter Bot
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 13 * * 1-5'  # Runs at 13:30 UTC (9:30 AM EST) Monday–Friday
+    - cron: '30 13 * * 1-5'  # 9:30 AM EST Monday–Friday
 
 jobs:
   run-bot:
@@ -18,8 +18,9 @@ jobs:
       - name: ✅ Checkout repo
         uses: actions/checkout@v4
 
-      - name: Decode Google Sheets JSON key
-        run: echo "${{ secrets.GSHEETS_KEY_B64 }}" | base64 -d > google_sheets.json
+      - name: 🔐 Decode Google Sheets JSON key
+        run: |
+          echo "$GOOGLE_SHEETS_KEY_B64" | base64 -d > google_sheets.json
 
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
@@ -28,6 +29,7 @@ jobs:
 
       - name: 📦 Install dependencies
         run: |
+          pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: 🚀 Run MoneyPrinter Bot
