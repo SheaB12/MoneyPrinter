@@ -4,7 +4,7 @@ from datetime import datetime
 import traceback
 
 # Define your sheet ID and sheet/tab name here
-SHEET_ID = MoneyPrinter Logs  # <- Replace this with your actual Sheet ID
+SHEET_ID = 10iX_0DoMMmgMdWPWH8EUOs19wphOIfqybloG_KRvo9U  # <- Replace this with your actual Sheet ID
 SHEET_NAME = Logs
 
 def get_credentials():
