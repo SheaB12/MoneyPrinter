@@ -1,5 +1,9 @@
-def execute_trade(direction, confidence, reason):
-    # Simulated trade execution logic
-    print(f"🚀 Trade Executed: {direction}")
-    print(f"🔍 Confidence: {confidence:.2f}")
-    print(f"🧠 Reason: {reason}")
+def execute_trade(action, confidence):
+    # Simulated trade logic or actual API logic
+    print(f"Placing {action.upper()} trade with {confidence}% confidence...")
+    # Return dummy result
+    return {
+        "status": "success",
+        "action": action,
+        "confidence": confidence
+    }
