@@ -7,3 +7,4 @@ schedule
 python-dotenv
 gspread
 oauth2client
+discord-webhook
