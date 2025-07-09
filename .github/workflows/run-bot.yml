@@ -1,4 +1,4 @@
-name: Run MoneyPrinter Bot
+name: Run MoneyPrinter $Bot
 
 on:
   workflow_dispatch:
