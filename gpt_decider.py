@@ -3,7 +3,7 @@ import openai
 import pandas as pd
 import json
 
-# Ensure the OpenAI API key is loaded
+# Load OpenAI API key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise EnvironmentError("Missing OPENAI_API_KEY in environment variables.")
@@ -13,42 +13,40 @@ openai.api_key = OPENAI_API_KEY
 
 def gpt_decision(df: pd.DataFrame) -> dict:
     """
-    Make a trade decision using GPT based on the last 30 minutes of SPY 1-minute candle data.
-
-    Args:
-        df (pd.DataFrame): SPY 1-minute data with columns like Datetime, Open, High, Low, Close, Volume.
-
-    Returns:
-        dict: A dictionary with 'direction', 'confidence', and 'reason' keys.
+    Send last 30 minutes of SPY 1-min candles to GPT for trade decision.
+    Returns a dict with direction, confidence, and reason.
     """
-    # Use only the last 30 minutes
-    df = df.tail(30)
+    # Take last 30 minutes
+    df = df.tail(30).copy()
 
-    # Reset index to include datetime in each row
-    df.reset_index(inplace=True)
+    # Reset index to remove tuple/datetime indexing and treat timestamp as column
+    df = df.reset_index()
 
-    # Convert timestamps to string for JSON serialization
-    df["Datetime"] = df["Datetime"].dt.strftime('%Y-%m-%d %H:%M')
+    # Rename timestamp column for clarity and JSON safety
+    if "Datetime" not in df.columns:
+        df.rename(columns={"index": "Datetime"}, inplace=True)
 
-    # Convert to list of records (dicts), which is JSON-safe
+    # Ensure timestamp is a string
+    df["Datetime"] = df["Datetime"].astype(str)
+
+    # Convert to list of dicts for safe JSON serialization
     candle_data = df.to_dict(orient="records")
 
-    # Build the prompt
+    # Prompt to GPT
     prompt = (
-        "You're a professional SPY options trader assistant. Given the last 30 minutes of 1-minute SPY price data "
-        "(each with datetime, open, high, low, close, and volume), decide whether to BUY a CALL or PUT option. "
-        "Also estimate a confidence level (0 to 1) and briefly explain your reasoning.\n\n"
-        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_data)}\n\n"
-        "Respond in JSON format like this:\n"
+        "You're a professional SPY options trading assistant. Based on the following 30 minutes of 1-minute SPY data "
+        "(datetime, open, high, low, close, volume), determine if the next 30 minutes favor a CALL or PUT. "
+        "Give a confidence score (0 to 1) and a 1-sentence explanation.\n\n"
+        f"{json.dumps(candle_data)}\n\n"
+        "Respond in this exact JSON format:\n"
         '{\n'
         '  "direction": "CALL" or "PUT",\n'
         '  "confidence": 0.xx,\n'
-        '  "reason": "Your explanation here"\n'
+        '  "reason": "brief reasoning"\n'
         '}'
     )
 
     try:
-        # Send the prompt to OpenAI ChatCompletion (GPT-4)
         response = openai.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
@@ -58,10 +56,10 @@ def gpt_decision(df: pd.DataFrame) -> dict:
 
         content = response.choices[0].message.content.strip()
 
-        # Try parsing the JSON content
+        # Try parsing GPT response
         decision = json.loads(content)
 
-        # Validate response
+        # Validate and return
         if (
             "direction" in decision
             and decision["direction"] in ("CALL", "PUT")
@@ -74,7 +72,7 @@ def gpt_decision(df: pd.DataFrame) -> dict:
                 "reason": decision.get("reason", ""),
             }
 
-        raise ValueError("Incomplete or invalid GPT decision format")
+        raise ValueError("GPT response missing required keys.")
 
     except Exception as e:
         print(f"⚠️ GPT decision error: {e}")
