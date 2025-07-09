@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      GOOGLE_SHEETS_KEY_B64: ${{ secrets.GOOGLE_SHEETS_KEY_B64 }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
@@ -19,8 +18,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🔐 Decode Google Sheets JSON key
+        env:
+          GSHEETS_KEY_B64: ${{ secrets.GSHEETS_KEY_B64 }}
         run: |
-          echo "$GOOGLE_SHEETS_KEY_B64" | base64 -d > google_sheets.json
+          echo "$GSHEETS_KEY_B64" | base64 -d > google_sheets.json
+          echo "✅ google_sheets.json created"
 
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
