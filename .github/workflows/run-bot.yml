@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      GOOGLE_SHEETS_KEY_B64: ${{ secrets.GOOGLE_SHEETS_KEY_B64 }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
@@ -17,17 +18,15 @@ jobs:
       - name: ✅ Checkout repo
         uses: actions/checkout@v4
 
-      - name: 🔐 Decode Google Sheets JSON key
-        env:
-          GSHEETS_KEY_B64: ${{ secrets.GSHEETS_KEY_B64 }}
+      - name: 🔐 Decode Google Sheets JSON key securely
         run: |
-          echo "$GSHEETS_KEY_B64" | base64 -d > google_sheets.json
-          echo "✅ google_sheets.json created"
+          echo "$GOOGLE_SHEETS_KEY_B64" | base64 --decode > google_sheets.json
+          if ! jq empty google_sheets.json; then
+            echo "❌ Decoded google_sheets.json is invalid JSON"
+            cat google_sheets.json
+            exit 1
+          fi
 
-      - name: 🔎 Debug google_sheets.json (sanitized)
-        run: |
-         head -n 10 google_sheets.json || echo "File missing or malformed"
-          
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
