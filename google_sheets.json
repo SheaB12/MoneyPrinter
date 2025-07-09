@@ -1,15 +1,13 @@
-import base64
-
-# Input and output filenames
-input_file = "google_sheets.json"
-output_file = "google_sheets_b64.txt"
-
-# Read and encode
-with open(input_file, "rb") as f:
-    encoded = base64.b64encode(f.read()).decode("utf-8")
-
-# Write to output file
-with open(output_file, "w") as f:
-    f.write(encoded)
-
-print(f"✅ Base64-encoded key saved to {output_file}")
+{
+  "type": "service_account",
+  "project_id": "moneyprinter-465403",
+  "private_key_id": "5ed6478e63a4d897378ee6bf7da731115936bcd8",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCt9sqtBepn9TCY\neDShcjIXyw7eBk1f8pTYg/N2utdZ2xwXuWeITZv2jXMl32aqtzjRTt3fR3McAvaM\nCm8OALmqjKz09fDSn+mebU3qPcG9VbzrY6+fLbPlAm0jDosT1NgsjxH0vnbmGUVY\nvZ5fttzqQ59rMOVkvMAPfJr4jRwDcRkQwjUF4qhPHHqSmq1iyrgo4wD0XZmB2i1W\n0s88RFQbonlINhkjOXl2kJbQOv2rjsziWW4VptGiVqLEMUTWK0u9z/zmitugmhAM\nYU1DIjUJdFljoYe2Y3HHV5v2WkyERXu7eMZyMgM1g90adyISmHexcQ8pUNE4JYUh\noCrefVbNAgMBAAECggEAE/ksXv45YhM0L6VJganPV40AWXyGwLfk4BESUHT2ScJO\n8OhgGzWx7PZjnJsQOhSMSPfRoJOfAz3R2dVO1+A8cPjy2LMuIbirhX2OPxE1H8xq\nwunwnYmNSINlTWubizzaTw9kI+IEW7nWDPDEcL/ZkGoQMSnthInpUT3gux3UdA6F\nJlBUXG4gjDzr7p9kRCAAg7IslkX7zG8tw6DCn3gjd/SCVsD/1udlsG2iqRLyrqma\nwiZRqetlf9oEGA8rTpw5Lk1kX9F9BIbVUrXMry5a8cNRke5/LKUlHxSNolxhqaGw\nvMljdUcdMoywheKmVDaN2ieHolq7TfQ2T+MyT8gZgQKBgQDe+ueHySCxORI+rzaD\nRJhpL26Hf3Tj6ETbAa7bKATnjeiMPi2Cylnr/2IC1DvZETn23DrZyulSUk/rBI8C\nkNyP+rOlh9UI38UjdSj3IurdVmxsZAAsT2tBnLGu4Eb7GAnVmVmAfUVliJ2UuMac\nrv4Z0+rKfqPlA2h61MLZfKf6QQKBgQDHubSvWtnIDhRvT7CdveeS8ayrYtLmET14\nNLMPK4KRptGCpJFezykN7BrtXtyIn9VOeIiQk065S4SM+uiWWNouNkGfpJi0sbJp\n7U8eLVA5vSBpEajoBzQB0hl1TAi8gdeTvr0yKsvEsXq4F0bxYVPWIG7imgazq/xU\nWJ5wJ+5BjQKBgGMnocPBDZehcFqNoakX3MqRfA4nAHzEcbIN+oqcLiol8a5DjAto\nHjqSsyvc4swxG9yJrGXjFIQ19DHnMg0LC/m+mxpV38b1cv3EgLX9QgGxB7/fbDBI\nFML1ghHoy8emteDVM3auvihbau+Sh0dvjbFAil0HmawiKtjMOeVqyGvBAoGBAIqc\nRFyqlZg0xVPXH4DqKgweM7KiHDHVZy7EjDyL+srw1lhvs//zj898u9dfTXh4TMZv\n+n8z7J/GXFCnVcH6GjmWKAcOaXiGFodTTeRomFPqANNKkUmurhZRZJ+2TB3fkuiT\nqKRndRGmBsA6T174KAHkcnBLazlItA8pjZPS8pSFAoGBAJ1IHK71iAiW8kf1aFYB\nDSYJe3i8Woci+IRdmnDejL8bSl1OIvLH492HGS0ap1CmTBuzkkH6DoVkG1hLh3bo\nWVzqyLL13HPKgkKDziS9Sb1v7eSlEoJPvRGY04lW1Oa8QBMZewKOMjwq8BmzTKyV\nclFXKWUZcvOPFGRSyGGKYKLy\n-----END PRIVATE KEY-----\n",
+  "client_email": "money-printed@moneyprinter-465403.iam.gserviceaccount.com",
+  "client_id": "102468646917143882879",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/money-printed%40moneyprinter-465403.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
