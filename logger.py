@@ -1,107 +1,114 @@
 import os
+import json
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
-from gspread_formatting import *
+from gspread_formatting import CellFormat, Color, format_cell_range
 
-# Google Sheets setup
+GOOGLE_SHEETS_KEY_B64 = os.getenv("GOOGLE_SHEETS_KEY_B64")
+SHEET_ID = "10iX_0DoMMmgMdWPWH8EUOs19wphOIfqybloG_KRvo9U"
+
 def get_sheet():
+    # Decode service account key safely
+    if not os.path.exists("google_sheets.json"):
+        if not GOOGLE_SHEETS_KEY_B64:
+            raise ValueError("Missing GOOGLE_SHEETS_KEY_B64 or google_sheets.json")
+        with open("google_sheets.json", "w") as f:
+            f.write(base64_decode(GOOGLE_SHEETS_KEY_B64))
+
     creds = ServiceAccountCredentials.from_json_keyfile_name("google_sheets.json", [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ])
     client = gspread.authorize(creds)
-    return client.open_by_key("10iX_0DoMMmgMdWPWH8EUOs19wphOIfqybloG_KRvo9U")
+    return client.open_by_key(SHEET_ID)
 
-# Auto-resize columns
-def autosize(worksheet):
+def base64_decode(b64_str):
+    import base64
+    return base64.b64decode(b64_str).decode("utf-8")
+
+def get_results_tab(sheet):
     try:
-        set_column_width(worksheet, 'A', 200)
-        auto_resize_columns(worksheet, 1, worksheet.col_count)
-    except Exception:
-        pass
+        return sheet.worksheet("Results")
+    except:
+        return sheet.add_worksheet(title="Results", rows="1000", cols="20")
 
-# Create worksheet if it doesn't exist
-def ensure_tab(sheet, tab_name, headers):
-    try:
-        worksheet = sheet.worksheet(tab_name)
-    except gspread.exceptions.WorksheetNotFound:
-        worksheet = sheet.add_worksheet(title=tab_name, rows="1000", cols="20")
-        worksheet.append_row(headers)
-    return worksheet
-
-# Log decision with confidence and GPT output
 def log_trade_decision(data):
     sheet = get_sheet()
-    tab_name = "Decisions"
-    headers = ["Timestamp", "Strategy", "Action", "Confidence", "Reason"]
+    ws = get_results_tab(sheet)
 
-    ws = ensure_tab(sheet, tab_name, headers)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.utcnow()
+    month = now.strftime("%Y-%m")
+    strategy = "GPT"
+    row_id = f"{month}-{strategy}"
 
-    row = [now, data.get("strategy", "Unknown"), data["action"], data["confidence"], data["reason"]]
-    ws.append_row(row)
-    autosize(ws)
-
-# Log final trade outcome with result and performance
-def log_trade_result(result_data):
-    sheet = get_sheet()
-    tab_name = "Results"
-    headers = ["Timestamp", "Strategy", "Action", "Confidence", "Win/Loss", "PnL%", "Comment"]
-
-    ws = ensure_tab(sheet, tab_name, headers)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    headers = ["date", "strategy", "action", "confidence", "reason", "result", "pnl"]
+    try:
+        existing = ws.row_values(1)
+        if existing != headers:
+            ws.resize(rows=1)
+            ws.update("A1:G1", [headers])
+    except:
+        ws.update("A1:G1", [headers])
 
     row = [
-        now,
-        result_data.get("strategy", "Unknown"),
-        result_data["action"],
-        result_data["confidence"],
-        result_data["outcome"],
-        result_data.get("pnl", ""),
-        result_data.get("comment", "")
+        now.strftime("%Y-%m-%d"),
+        strategy,
+        data.get("action", "").lower(),
+        data.get("confidence", 0),
+        data.get("reason", ""),
+        data.get("result", ""),
+        data.get("pnl", "")
     ]
-    ws.append_row(row)
+    ws.append_row(row, value_input_option="USER_ENTERED")
 
-    # Color-code win/loss
-    row_index = len(ws.get_all_values())
-    color = {
-        "WIN": (0.8, 1.0, 0.8),
-        "LOSS": (1.0, 0.8, 0.8)
-    }.get(result_data["outcome"].upper(), (1, 1, 1))
+    # Apply color to the result column
+    format_result_colors(ws)
 
-    fmt = cellFormat(backgroundColor=color)
-    format_cell_range(ws, f"A{row_index}:G{row_index}", fmt)
-    autosize(ws)
-
-# Return recent logs (last 30)
-def get_recent_logs(sheet, tab_name="Results", num_rows=30):
+def format_result_colors(ws):
     try:
-        ws = sheet.worksheet(tab_name)
+        import gspread_formatting as gsf
         records = ws.get_all_records()
-        return records[-num_rows:] if len(records) >= num_rows else records
+        for i, row in enumerate(records, start=2):
+            result = row.get("result", "").lower()
+            if "win" in result:
+                fmt = CellFormat(backgroundColor=Color(0.8, 1, 0.8))
+            elif "loss" in result:
+                fmt = CellFormat(backgroundColor=Color(1, 0.8, 0.8))
+            else:
+                continue
+            format_cell_range(ws, f"A{i}:G{i}", fmt)
     except Exception as e:
-        print("Error fetching logs:", e)
-        return []
+        print(f"⚠️ Formatting failed: {e}")
 
-# Generate daily performance summary
-def get_daily_summary():
-    sheet = get_sheet()
-    ws = ensure_tab(sheet, "Results", [])
-    today = datetime.now().strftime("%Y-%m-%d")
-
+def get_recent_logs(sheet, limit=5):
+    ws = get_results_tab(sheet)
     records = ws.get_all_records()
-    daily = [r for r in records if r["Timestamp"].startswith(today)]
+    recent = records[-limit:] if records else []
+    return recent
 
-    wins = sum(1 for r in daily if r["Win/Loss"].upper() == "WIN")
-    losses = sum(1 for r in daily if r["Win/Loss"].upper() == "LOSS")
-    total = wins + losses
-    avg_pnl = round(sum(float(r["PnL%"]) for r in daily if r["PnL%"]) / total, 2) if total > 0 else 0
+def get_daily_summary():
+    try:
+        sheet = get_sheet()
+        ws = get_results_tab(sheet)
+        records = ws.get_all_records()
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today_logs = [r for r in records if r["date"] == today]
 
-    return (
-        f"📊 **Daily Summary for {today}**\n"
-        f"✅ Wins: {wins}\n"
-        f"❌ Losses: {losses}\n"
-        f"💰 Avg PnL: {avg_pnl}%\n"
-        f"📈 Total Trades: {total}"
-    )
+        if not today_logs:
+            return None
+
+        total = len(today_logs)
+        wins = sum(1 for r in today_logs if "win" in str(r.get("result", "")).lower())
+        losses = total - wins
+        avg_pnl = sum(float(r.get("pnl", 0) or 0) for r in today_logs) / total
+
+        summary = (
+            f"📅 Date: `{today}`\n"
+            f"📊 Trades: `{total}` | ✅ Wins: `{wins}` | ❌ Losses: `{losses}`\n"
+            f"💰 Avg PnL: `{avg_pnl:.2f}%`\n"
+        )
+        return summary
+    except Exception as e:
+        print(f"❌ Error generating daily summary: {e}")
+        return None
