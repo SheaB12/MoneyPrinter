@@ -1,87 +1,73 @@
-# gpt_decider.py
-
+import openai
 import os
 import json
-import openai
-import datetime as dt
-import pandas as pd
-
+from datetime import datetime
 from logger import get_sheet, get_recent_logs, log_trade_decision
-from alerts import send_discord_decision_alert  # ✅ Make sure this is defined in alerts.py
+from alerts import send_trade_alert
+import pandas as pd
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def gpt_decision(df):
+    # Normalize columns
+    df.columns = [str(col).strip().capitalize() for col in df.columns]
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        raise KeyError(f"Missing required columns: {missing_cols}")
+
+    df = df.dropna(subset=required_columns)
+    if df.empty or len(df) < 30:
+        print("⚠️ Not enough data for decision.")
+        return {"action": "skip", "confidence": 0, "reason": "Not enough valid candles."}
+
     sheet = get_sheet()
+    try:
+        recent_logs = get_recent_logs(sheet, tab="Results")
+    except Exception as e:
+        print(f"Error fetching logs: {e}")
+        recent_logs = []
 
-    # ✅ Flatten multi-index columns from yfinance if present
-    if isinstance(df.columns[0], tuple):
-        df.columns = ['_'.join(map(str, col)).strip() for col in df.columns]
-
-    # ✅ Normalize column names
-    df.columns = [col.lower().capitalize() for col in df.columns]
-
-    # ✅ Ensure necessary columns exist
-    required_columns = ["Open", "High", "Low", "Close", "Volume"]
-    if not all(col in df.columns for col in required_columns):
-        raise KeyError(f"Missing required columns: {required_columns}")
-
-    # ✅ Clean and trim data
-    df = df.dropna(subset=required_columns).tail(30)
-
-    candle_records = []
-    for timestamp, row in df.iterrows():
-        candle_records.append({
-            "time": str(timestamp),
+    # Get last 30 candles
+    last_30 = df.tail(30)
+    candle_records = [
+        {
+            "time": row["Datetime"].strftime("%H:%M"),
             "open": round(float(row["Open"]), 2),
             "high": round(float(row["High"]), 2),
             "low": round(float(row["Low"]), 2),
             "close": round(float(row["Close"]), 2),
-            "volume": int(row["Volume"])
-        })
-
-    try:
-        recent_logs = get_recent_logs(sheet)
-    except Exception as e:
-        print(f"Error fetching recent logs: {e}")
-        recent_logs = []
+            "volume": int(row["Volume"]),
+        }
+        for _, row in last_30.iterrows()
+    ]
 
     prompt = (
-        "You are a trading assistant helping with SPY options decisions.\n"
-        "Choose one: 'call', 'put', or 'skip'.\n"
-        f"Here is the last 30 minutes of SPY 1-minute candles:\n\n{json.dumps(candle_records)}\n\n"
-        f"Recent trade history:\n{json.dumps(recent_logs)}\n\n"
-        "What should we do next and why? Respond ONLY in JSON like:\n"
-        '{"action": "call", "confidence": 75, "reason": "Your reason here"}'
+        "You are a professional SPY options trader. Based on the last 30 one-minute candles, "
+        "decide if you would BUY CALL, BUY PUT, or SKIP. Include a confidence score (0-100) and brief reason.\n\n"
+        f"{json.dumps(candle_records)}"
     )
 
-    print("📡 Sending prompt to GPT...")
     response = openai.ChatCompletion.create(
         model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are an expert SPY trader using 1-min chart data."},
-            {"role": "user", "content": prompt}
-        ]
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
     )
 
-    reply = response["choices"][0]["message"]["content"]
-    print("🤖 GPT replied:\n")
-    print(reply)
-
+    reply = response['choices'][0]['message']['content']
     try:
         decision_data = json.loads(reply)
     except json.JSONDecodeError:
-        decision_data = {
-            "action": "skip",
-            "confidence": 0,
-            "reason": "Unable to parse GPT reply."
-        }
+        print("❌ GPT response not valid JSON.")
+        return {"action": "skip", "confidence": 0, "reason": "Invalid JSON response"}
 
-    decision_data["timestamp"] = dt.datetime.now().isoformat()
-    decision_data["strategy"] = "GPT"
-
-    # ✅ Log decision and send alert
+    # Log and send alert
     log_trade_decision(decision_data)
-    send_discord_decision_alert(decision_data)
+    send_trade_alert(
+        action=decision_data.get("action", "skip"),
+        confidence=decision_data.get("confidence", 0),
+        reason=decision_data.get("reason", "No reason provided.")
+    )
 
     return decision_data
