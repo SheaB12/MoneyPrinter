@@ -5,6 +5,7 @@ from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
+
 def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPrinter Alert"):
     if not DISCORD_WEBHOOK_URL:
         print("❌ DISCORD_WEBHOOK_URL is not set.")
@@ -30,7 +31,12 @@ def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPri
 
 def send_trade_alert(action: str, confidence: int, reason: str):
     color = 0x2ecc71 if action.lower() in ['call', 'put'] else 0xe74c3c
-    message = f"**Action**: `{action.upper()}`\n**Confidence**: `{confidence}%`\n**Reason**: {reason}"
+    message = (
+        f"**Action**: `{action.upper()}`\n"
+        f"**Confidence**: `{confidence}%`\n"
+        f"**Reason**: {reason}\n"
+        f"📅 **Expiration**: `End of Day (EOD)`"
+    )
     send_discord_alert(message, color, title="🤖 GPT Trade Decision")
 
 
@@ -57,7 +63,3 @@ def send_daily_summary():
         send_discord_alert(summary, color=0x7289DA, title="📅 Daily Performance Summary")
     except Exception as e:
         print(f"❌ Error sending daily summary: {e}")
-
-
-# ✅ Backward-compatible alias for legacy imports
-send_discord_decision_alert = send_trade_alert
