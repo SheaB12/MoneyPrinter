@@ -2,7 +2,7 @@ name: MoneyPrinter Daily Run
 
 on:
   schedule:
-    - cron: '25 13 * * 1-5'  # 9:25 AM EST Mon–Fri (13:25 UTC)
+    - cron: '30 12 * * 1-5'  # 9:25 AM EST Mon–Fri (13:25 UTC)
   workflow_dispatch:
 
 jobs:
