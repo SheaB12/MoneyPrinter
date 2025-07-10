@@ -1,12 +1,12 @@
+import openai
 import os
 import json
 import pandas as pd
-from openai import OpenAI
 from alerts import send_trade_alert
 from logger import get_sheet, get_recent_logs, log_trade_decision
 from strike_logic import recommend_strike_type
 
-openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def gpt_decision(df: pd.DataFrame) -> dict:
     # 🧼 Flatten MultiIndex columns if needed
@@ -57,7 +57,6 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         "Decide to BUY CALL, BUY PUT, or SKIP. Respond with JSON: "
         "{\"action\": \"call\", \"confidence\": 76, \"reason\": \"...\"}"
     )
-
     user_prompt = (
         f"Last 30m candles:\n{json.dumps(candles)}\n\n"
         f"Recent logs:\n{json.dumps(logs)}\n\nWhat’s the decision?"
@@ -81,30 +80,22 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         confidence = int(data.get("confidence", 0))
         reason = data.get("reason", "No reason provided.")
 
-        # ✅ Get strike type recommendation
-        strike_type = recommend_strike_type(action, confidence, logs)
+        # 🧠 Recommend strike type
+        strike_type = recommend_strike_type(action, confidence)
 
-        # 🛰️ Alert with strike type + EOD expiration
-        full_reason = f"{reason}\n\n📌 Expiration: End of Day\n🎯 Strike Type: {strike_type}"
-        send_trade_alert(action, confidence, full_reason)
+        # 🚨 Alert
+        send_trade_alert(action, confidence, reason, strike_type)
 
-        # 🧾 Log decision
+        # 📊 Log
         log_trade_decision({
             "action": action,
             "confidence": confidence,
             "reason": reason,
             "strike_type": strike_type,
-            "expiration": "EOD",
             "raw": reply
         })
 
-        return {
-            "action": action,
-            "confidence": confidence,
-            "reason": reason,
-            "strike_type": strike_type,
-            "expiration": "EOD"
-        }
+        return data
 
     except Exception as e:
         print(f"❌ GPT decision error: {e}")
