@@ -2,80 +2,102 @@ import os
 import json
 import openai
 import pandas as pd
-from logger import get_sheet, get_recent_logs, log_trade_decision
+from datetime import datetime
+from logger import get_sheet, log_trade_decision, get_recent_logs
+from alerts import send_discord_alert
 
-# Set OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-
-def gpt_decision(df, strategy_name="Default Strategy"):
-    try:
-        sheet = get_sheet()
-        recent_logs = get_recent_logs(sheet)
-    except Exception as e:
-        print(f"Error fetching recent logs: {e}")
-        recent_logs = []
-
-    # ✅ Handle empty DataFrame or missing columns
+def gpt_decision(df):
+    sheet = get_sheet()
     required_columns = ["Open", "High", "Low", "Close", "Volume"]
-    if df.empty or not all(col in df.columns for col in required_columns):
-        print("⚠️ DataFrame is empty or missing expected columns. Skipping decision.")
-        return {
-            "action": "skip",
-            "confidence": 0,
-            "reason": "SPY data unavailable or invalid."
-        }
 
+    # Validate dataframe is not empty
+    if df.empty:
+        reason = "SPY data is empty. Market may be closed or API failed."
+        print(f"⚠️ {reason}")
+        send_discord_alert(f"⛔ Skipping due to data issue: {reason}", color=0xFF3333)
+        decision = {"action": "skip", "confidence": 0, "reason": reason}
+        log_trade_decision(sheet, decision, strategy_name="Data Validation")
+        return decision
+
+    # Validate required columns exist
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        reason = f"Missing required columns: {missing_cols}"
+        print(f"⚠️ {reason}")
+        send_discord_alert(f"⛔ Skipping due to data issue: {reason}", color=0xFF3333)
+        decision = {"action": "skip", "confidence": 0, "reason": reason}
+        log_trade_decision(sheet, decision, strategy_name="Data Validation")
+        return decision
+
+    # Prepare and clean data
     df = df.tail(30).copy()
     df = df.dropna(subset=required_columns)
-    df["Open"] = pd.to_numeric(df["Open"], errors="coerce")
-    df["High"] = pd.to_numeric(df["High"], errors="coerce")
-    df["Low"] = pd.to_numeric(df["Low"], errors="coerce")
-    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
-    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
-    df = df.dropna()
+    df[required_columns] = df[required_columns].apply(pd.to_numeric, errors="coerce")
 
-    candles = []
-    for _, row in df.reset_index().iterrows():
-        candles.append({
-            "timestamp": str(row["Datetime"]),
-            "open": round(row["Open"], 2),
-            "high": round(row["High"], 2),
-            "low": round(row["Low"], 2),
-            "close": round(row["Close"], 2),
+    # Re-check for NaNs after type coercion
+    if df[required_columns].isnull().values.any():
+        reason = "SPY data has NaNs in required columns after coercion."
+        print(f"⚠️ {reason}")
+        send_discord_alert(f"⛔ Skipping due to data issue: {reason}", color=0xFF3333)
+        decision = {"action": "skip", "confidence": 0, "reason": reason}
+        log_trade_decision(sheet, decision, strategy_name="Data Validation")
+        return decision
+
+    # Format data for GPT
+    candle_records = []
+    for timestamp, row in df.iterrows():
+        candle_records.append({
+            "time": timestamp.strftime("%H:%M"),
+            "open": round(float(row["Open"]), 2),
+            "high": round(float(row["High"]), 2),
+            "low": round(float(row["Low"]), 2),
+            "close": round(float(row["Close"]), 2),
             "volume": int(row["Volume"])
         })
 
-    # 🧠 Prompt
+    # Fetch recent results for GPT context
+    try:
+        recent_logs = get_recent_logs(sheet, tab="Results", limit=5)
+        recent_summary = "\n".join([f"{x['date']}: {x['result']} ({x['strategy']})" for x in recent_logs])
+    except Exception as e:
+        recent_summary = "Recent performance data unavailable."
+        print(f"Error fetching recent logs: {e}")
+
+    # Prepare GPT prompt
     prompt = (
-        "You are an elite SPY options day trader.\n"
-        "Make a decision: 'call', 'put', or 'skip'. Return JSON like:\n"
-        '{"action": "call", "confidence": 80, "reason": "trend up"}\n\n'
-        f"Last 30m SPY candles:\n{json.dumps(candles, indent=2)}\n\n"
-        f"Recent trades:\n{json.dumps(recent_logs, indent=2)}"
+        "You're an expert SPY options trader. Based on the last 30 minutes of 1-minute candle data, "
+        "decide whether to BUY a CALL, PUT, or SKIP trading today. Only choose one of the three. "
+        "Respond in this exact JSON format: "
+        '{ "action": "call" | "put" | "skip", "confidence": %, "reason": "" }\n\n'
+        f"Recent trades summary:\n{recent_summary}\n\n"
+        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}"
     )
 
+    # Call OpenAI
     print("📡 Sending prompt to GPT...")
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a financial trading assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.4
+    )
+
+    content = response["choices"][0]["message"]["content"]
+    print(f"🤖 GPT replied:\n\n{content}\n")
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300,
-            temperature=0.3
-        )
-        content = response.choices[0].message["content"]
-        print("🤖 GPT replied:\n")
-        print(content)
-
-        decision_data = json.loads(content)
-        log_trade_decision(sheet, decision_data, strategy_name)
-        return decision_data
-
+        decision = json.loads(content)
+        if decision["action"] not in ["call", "put", "skip"]:
+            raise ValueError("Invalid action in GPT response.")
     except Exception as e:
-        print(f"❌ GPT response error: {e}")
-        return {
-            "action": "skip",
-            "confidence": 0,
-            "reason": f"GPT failure: {e}"
-        }
+        print(f"⚠️ Failed to parse GPT response: {e}")
+        decision = {"action": "skip", "confidence": 0, "reason": "Invalid or malformed GPT response."}
+        send_discord_alert(f"⚠️ GPT failed to reply correctly: {e}", color=0xFF0000)
+
+    # Log and return decision
+    log_trade_decision(sheet, decision, strategy_name="GPT Strategy")
+    return decision
