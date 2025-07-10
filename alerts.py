@@ -1,7 +1,7 @@
 import requests
 import os
-from datetime import datetime
 from logger import get_daily_summary
+from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
@@ -27,16 +27,14 @@ def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPri
     else:
         print("✅ Discord alert sent.")
 
-def send_trade_alert(action, confidence, reason, strike_type, entry_time, exit_time):
-    color = 0x2ecc71 if action == "call" else 0xe74c3c if action == "put" else 0x95a5a6
+def send_trade_alert(action: str, confidence: int, reason: str, strike_type: str):
+    color = 0x2ecc71 if action in ['call', 'put'] else 0xe67e22
     message = (
         f"**Action**: `{action.upper()}`\n"
         f"**Confidence**: `{confidence}%`\n"
-        f"**Reason**: {reason}\n"
         f"**Strike Type**: `{strike_type}`\n"
         f"**Expiration**: `End of Day`\n"
-        f"**Entry Time**: `{entry_time}`\n"
-        f"**Exit Time**: `{exit_time}`"
+        f"**Reason**: {reason}"
     )
     send_discord_alert(message, color, title="🤖 GPT Trade Decision")
 
@@ -57,7 +55,6 @@ def send_daily_summary():
         if not summary:
             print("⚠️ No daily summary available to send.")
             return
-
         send_discord_alert(summary, color=0x7289DA, title="📅 Daily Performance Summary")
     except Exception as e:
         print(f"❌ Error sending daily summary: {e}")
