@@ -5,30 +5,33 @@ import pandas as pd
 from alerts import send_trade_alert
 from logger import get_sheet, get_recent_logs, log_trade_decision
 
-# Set OpenAI API key from environment
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def gpt_decision(df: pd.DataFrame) -> dict:
-    # 🔧 Normalize and flatten column names
-    df.columns = [col[1] if isinstance(col, tuple) else col for col in df.columns]
-    df.columns = [col.lower().capitalize() for col in df.columns]
+    # 🧼 Flatten MultiIndex columns if needed
+    if isinstance(df.columns[0], tuple):
+        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
 
-    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    if missing_cols:
-        raise KeyError(f"{missing_cols}")
+    # 🧾 Normalize column names
+    df.columns = [col.strip().capitalize() for col in df.columns]
 
-    df = df.dropna(subset=required_columns)
+    # ✅ Ensure required columns exist
+    required = ['Open', 'High', 'Low', 'Close', 'Volume']
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise KeyError(f"{missing}")
+
+    # 🧹 Clean + Convert
+    df = df.dropna(subset=required)
     if df.empty:
-        raise ValueError("Filtered DataFrame is empty after dropping NaNs.")
+        raise ValueError("SPY data is empty after cleaning.")
+    df = df.astype({col: 'float' for col in required})
 
-    df = df.astype({col: 'float' for col in required_columns})
-
-    # 🕒 Extract last 30 minutes
+    # ⏳ Last 30 minutes
     recent_df = df.tail(30)
 
     # 🧱 Format candles
-    candle_records = [
+    candles = [
         {
             "time": idx.strftime("%H:%M"),
             "open": round(row["Open"], 2),
@@ -40,28 +43,24 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         for idx, row in recent_df.iterrows()
     ]
 
-    # 🧠 Prepare prompt
+    # 🧠 GPT prompt setup
     try:
         sheet = get_sheet()
         logs = get_recent_logs(sheet=sheet)
     except Exception as e:
-        print(f"Error fetching recent logs: {e}")
+        print(f"Error fetching logs: {e}")
         logs = []
 
     system_prompt = (
-        "You're a stock trading assistant analyzing SPY 1-minute candlestick data. "
-        "You must choose whether to BUY CALL, BUY PUT, or SKIP. "
-        "Only respond with JSON like {\"action\": \"call\", \"confidence\": 72, \"reason\": \"...\"}. "
-        "Use the recent trade log and data for context."
+        "You're a trading assistant analyzing SPY 1-minute candles. "
+        "Decide to BUY CALL, BUY PUT, or SKIP. Respond with JSON: "
+        "{\"action\": \"call\", \"confidence\": 76, \"reason\": \"...\"}"
     )
-
     user_prompt = (
-        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}\n\n"
-        f"Here is the recent trade log:\n\n{json.dumps(logs)}\n\n"
-        "What action should we take?"
+        f"Last 30m candles:\n{json.dumps(candles)}\n\n"
+        f"Recent logs:\n{json.dumps(logs)}\n\nWhat’s the decision?"
     )
 
-    # 📡 Send to GPT
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
@@ -70,17 +69,16 @@ def gpt_decision(df: pd.DataFrame) -> dict:
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.5,
-            max_tokens=500,
+            max_tokens=500
         )
         reply = response.choices[0].message.content.strip()
-        print(f"🤖 GPT replied:\n\n{reply}\n")
+        print(f"🤖 GPT Reply:\n{reply}")
 
-        decision_data = json.loads(reply)
-        action = decision_data.get("action", "").lower()
-        confidence = int(decision_data.get("confidence", 0))
-        reason = decision_data.get("reason", "No reason provided.")
+        data = json.loads(reply)
+        action = data.get("action", "").lower()
+        confidence = int(data.get("confidence", 0))
+        reason = data.get("reason", "No reason provided.")
 
-        # ✅ Send alert and log
         send_trade_alert(action, confidence, reason)
         log_trade_decision({
             "action": action,
@@ -89,7 +87,7 @@ def gpt_decision(df: pd.DataFrame) -> dict:
             "raw": reply
         })
 
-        return decision_data
+        return data
 
     except Exception as e:
         print(f"❌ GPT decision error: {e}")
