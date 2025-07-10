@@ -1,96 +1,85 @@
+# gpt_decider.py
+
 import os
 import json
 import openai
+import datetime as dt
 import pandas as pd
-from logger import (
-    get_sheet,
-    log_trade_decision,
-    get_recent_logs
-)
-from alerts import send_discord_alert
+from logger import get_sheet, get_recent_logs, log_trade_decision
+from alerts import send_discord_decision_alert
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+def gpt_decision(df):
+    sheet = get_sheet()
 
-def gpt_decision(df: pd.DataFrame) -> dict:
-    # Normalize column capitalization
+    # ✅ Flatten MultiIndex columns if needed
+    if isinstance(df.columns[0], tuple):
+        df.columns = ['_'.join(map(str, col)).strip() for col in df.columns]
+
+    # ✅ Normalize columns for consistency
     df.columns = [col.lower().capitalize() for col in df.columns]
 
+    # ✅ Clean data
     required_columns = ["Open", "High", "Low", "Close", "Volume"]
-    missing_cols = [col for col in required_columns if col not in df.columns]
-
-    if df.empty or missing_cols:
-        reason = f"Missing or invalid columns from data: {missing_cols or 'DataFrame is empty'}"
-        print(f"⛔ {reason}")
-        send_discord_alert(f"⛔ Skipping due to data issue: {reason}", color=0xFF3333)
-        sheet = get_sheet()
-        decision = {"action": "skip", "confidence": 0, "reason": reason}
-        log_trade_decision(sheet, decision, strategy_name="Data Validation")
-        return decision
+    if not all(col in df.columns for col in required_columns):
+        raise KeyError(f"Missing required columns: {required_columns}")
 
     df = df.dropna(subset=required_columns)
     df = df.tail(30)
 
-    # Convert data to safe format for GPT
+    # ✅ Build candle records for GPT input
     candle_records = []
-    for i, row in df.iterrows():
-        try:
-            candle_records.append({
-                "time": i.strftime("%H:%M"),
-                "open": round(float(row["Open"]), 2),
-                "high": round(float(row["High"]), 2),
-                "low": round(float(row["Low"]), 2),
-                "close": round(float(row["Close"]), 2),
-                "volume": int(row["Volume"])
-            })
-        except Exception as e:
-            print(f"⚠️ Skipping row due to error: {e}")
-            continue
+    for timestamp, row in df.iterrows():
+        candle = {
+            "time": str(timestamp),
+            "open": round(float(row["Open"]), 2),
+            "high": round(float(row["High"]), 2),
+            "low": round(float(row["Low"]), 2),
+            "close": round(float(row["Close"]), 2),
+            "volume": int(row["Volume"])
+        }
+        candle_records.append(candle)
 
-    # Fetch recent decisions for context (optional)
     try:
-        sheet = get_sheet()
         recent_logs = get_recent_logs(sheet)
-        context = "\n".join(recent_logs)
     except Exception as e:
         print(f"Error fetching recent logs: {e}")
-        context = "Recent log data unavailable."
+        recent_logs = []
 
     prompt = (
-        f"You are an expert SPY options trading analyst. Based on the 1-minute candlestick data below, "
-        f"decide whether to BUY CALL, BUY PUT, or SKIP. Only choose one action. Return JSON like:\n"
-        f'{{"action": "call" or "put" or "skip", "confidence": 0-100, "reason": "your explanation"}}\n\n'
-        f"{context}\n\n"
+        "You are a trading assistant helping with SPY options decisions.\n"
+        "Your choices are: 'call', 'put', or 'skip'.\n"
         f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}\n\n"
+        f"Recent decisions: {json.dumps(recent_logs)}\n\n"
+        "What should we do next and why? Respond with a JSON like:\n"
+        '{"action": "call", "confidence": 75, "reason": "Your explanation here"}'
     )
 
     print("📡 Sending prompt to GPT...")
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a financial analyst making SPY trade decisions."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+    reply = response["choices"][0]["message"]["content"]
+    print("🤖 GPT replied:\n")
+    print(reply)
+
     try:
-        completion = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a professional SPY options trader."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.5
-        )
-        reply = completion.choices[0].message.content
-        print("🤖 GPT replied:\n")
-        print(reply)
-        decision = json.loads(reply)
+        decision_data = json.loads(reply)
+    except json.JSONDecodeError:
+        decision_data = {"action": "skip", "confidence": 0, "reason": "Could not parse GPT response."}
 
-        # Log decision and alert
-        log_trade_decision(sheet, decision, strategy_name="GPT Strategy")
-        send_discord_alert(
-            f"📊 **GPT Decision:** {decision['action'].upper()} | 🎯 Confidence: {decision['confidence']}%\n🧠 {decision['reason']}",
-            color=0x3366FF if decision["action"] != "skip" else 0xCCCCCC
-        )
+    # ✅ Log decision
+    decision_data["timestamp"] = dt.datetime.now().isoformat()
+    decision_data["strategy"] = "GPT"
+    log_trade_decision(decision_data)
 
-        return decision
+    # ✅ Send Discord alert
+    send_discord_decision_alert(decision_data)
 
-    except Exception as e:
-        print(f"Error during GPT decision: {e}")
-        send_discord_alert(f"❌ GPT decision failed: {e}", color=0xFF0000)
-        decision = {"action": "skip", "confidence": 0, "reason": "GPT error"}
-        log_trade_decision(sheet, decision, strategy_name="GPT Error")
-        return decision
+    return decision_data
