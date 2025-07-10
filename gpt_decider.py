@@ -1,25 +1,32 @@
 import os
 import json
 import openai
-from datetime import datetime
 from logger import get_sheet, get_recent_logs, log_trade_decision
 
-# Set OpenAI API key from environment
+# Set OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
 
 def gpt_decision(df, strategy_name="Default Strategy"):
     try:
         sheet = get_sheet()
-
-        # 🧠 Retrieve last 5 decisions from the sheet
-        recent_logs = get_recent_logs(sheet, limit=5)
+        recent_logs = get_recent_logs(sheet)  # 🛠 Removed invalid `limit=` arg
     except Exception as e:
         print(f"Error fetching recent logs: {e}")
         recent_logs = []
 
-    # ✅ Convert the last 30 minutes of 1-minute bars into a JSON-safe format
+    # ✅ Sanitize DataFrame
+    df = df.tail(30).copy()
+    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+    df["Open"] = pd.to_numeric(df["Open"], errors="coerce")
+    df["High"] = pd.to_numeric(df["High"], errors="coerce")
+    df["Low"] = pd.to_numeric(df["Low"], errors="coerce")
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+    df = df.dropna()
+
     candles = []
-    for idx, row in df.tail(30).reset_index().iterrows():
+    for _, row in df.reset_index().iterrows():
         candles.append({
             "timestamp": str(row["Datetime"]),
             "open": round(row["Open"], 2),
@@ -29,19 +36,17 @@ def gpt_decision(df, strategy_name="Default Strategy"):
             "volume": int(row["Volume"])
         })
 
-    # 🧠 GPT Prompt
+    # 🧠 Prompt for GPT
     prompt = (
-        "You are a disciplined SPY options day trader.\n"
-        "Use the following data to decide if we should BUY a CALL, BUY a PUT, or SKIP the trade.\n"
-        "Return only a valid JSON response like this:\n"
-        '{"action": "call", "confidence": 78, "reason": "Brief explanation"}\n\n'
-        f"Here is the last 30 minutes of SPY 1-minute candles:\n{json.dumps(candles, indent=2)}\n\n"
-        f"Here are the past 5 trades:\n{json.dumps(recent_logs, indent=2)}\n"
+        "You are an elite SPY options day trader.\n"
+        "Make a decision: 'call', 'put', or 'skip'. Return JSON like:\n"
+        '{"action": "call", "confidence": 80, "reason": "trend up"}\n\n'
+        f"Last 30m of SPY candles:\n{json.dumps(candles, indent=2)}\n\n"
+        f"Recent trades:\n{json.dumps(recent_logs, indent=2)}\n"
     )
 
     print("📡 Sending prompt to GPT...")
 
-    # 🔮 Get GPT response
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -53,14 +58,10 @@ def gpt_decision(df, strategy_name="Default Strategy"):
         print("🤖 GPT replied:\n")
         print(content)
 
-        # ✅ Parse GPT's JSON reply
         decision_data = json.loads(content)
-
-        # Log it to the sheet
         log_trade_decision(sheet, decision_data, strategy_name)
-
         return decision_data
 
     except Exception as e:
-        print(f"Error parsing GPT response: {e}")
-        return {"action": "skip", "confidence": 0, "reason": "GPT response error"}
+        print(f"❌ Error parsing GPT response: {e}")
+        return {"action": "skip", "confidence": 0, "reason": "GPT failed or malformed data"}
