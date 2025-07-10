@@ -1,41 +1,26 @@
-import os
-import time
 import yfinance as yf
 from gpt_decider import gpt_decision
-from execution import execute_trade
-from alerts import send_trade_alert
-from logger import log_trade_result
+from alerts import send_daily_summary
 
 def run():
-    print("\n📈 Fetching SPY...\n")
-    df = yf.download("SPY", interval="1m", period="1d", progress=False)
+    print("📈 Fetching SPY...")
+    df = yf.download("SPY", interval="1m", period="1d", progress=False, auto_adjust=False)
 
-    if df.empty:
-        raise ValueError("No data fetched for SPY. Check internet or API limits.")
+    # Handle MultiIndex column format
+    if isinstance(df.columns, tuple) or hasattr(df.columns, "levels"):
+        df.columns = df.columns.get_level_values(-1)
+    df = df.reset_index()
 
-    print("\n🧠 GPT making decision...\n")
+    print("🧠 GPT making decision...")
     decision_data = gpt_decision(df)
 
-    action = decision_data.get("action", "").lower()
-    confidence = float(decision_data.get("confidence", 0.0))
-    reason = decision_data.get("reason", "No reason provided.")
-
-    if action in ["call", "put"]:
-        print(f"\n🚀 Executing {action.upper()} trade...")
-        result = execute_trade(action=action, confidence=confidence)
-
-        # Log and alert the trade
-        log_trade_result(result)
-        send_trade_alert(
-            action=result["action"],
-            confidence=result["confidence"],
-            status=result["status"],
-            pnl=result["pnl"],
-            reason=reason
-        )
-
+    if decision_data and decision_data.get("action") != "skip":
+        print("✅ Trade decision logged.")
     else:
-        print("⛔ No trade executed. GPT recommended to SKIP.")
+        print("🚫 No trade taken.")
+
+    print("📅 Sending EOD summary...")
+    send_daily_summary()
 
 if __name__ == "__main__":
     run()
