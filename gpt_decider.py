@@ -1,94 +1,76 @@
+import json
 import openai
 import os
-import json
 import pandas as pd
 from alerts import send_trade_alert
-from logger import get_sheet, get_recent_logs, log_trade_decision
+from logger import get_sheet, get_recent_logs
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+def determine_strike_type(action: str) -> str:
+    """
+    Determines whether the option should be ATM, ITM, or OTM
+    based on backtested performance for the given action.
+    """
+    strike_lookup = {
+        "call": "ATM",
+        "put": "ITM"
+    }
+    return strike_lookup.get(action.lower(), "ATM")
+
 def gpt_decision(df: pd.DataFrame) -> dict:
-    # 🧼 Flatten MultiIndex columns if needed
-    if isinstance(df.columns[0], tuple):
-        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+    required_columns = ["Open", "High", "Low", "Close", "Volume"]
+    df.columns = [str(col).capitalize() for col in df.columns]
 
-    # 🧾 Normalize column names
-    df.columns = [col.strip().capitalize() for col in df.columns]
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        raise KeyError(f"Missing required columns: {missing_cols}")
 
-    # ✅ Ensure required columns exist
-    required = ['Open', 'High', 'Low', 'Close', 'Volume']
-    missing = [col for col in required if col not in df.columns]
-    if missing:
-        raise KeyError(f"{missing}")
+    df = df.dropna(subset=required_columns)
+    df = df.tail(30)
 
-    # 🧹 Clean + Convert
-    df = df.dropna(subset=required)
-    if df.empty:
-        raise ValueError("SPY data is empty after cleaning.")
-    df = df.astype({col: 'float' for col in required})
-
-    # ⏳ Last 30 minutes
-    recent_df = df.tail(30)
-
-    # 🧱 Format candles
-    candles = [
-        {
-            "time": idx.strftime("%H:%M"),
-            "open": round(row["Open"], 2),
-            "high": round(row["High"], 2),
-            "low": round(row["Low"], 2),
-            "close": round(row["Close"], 2),
+    candle_records = []
+    for index, row in df.iterrows():
+        candle_records.append({
+            "timestamp": str(index),
+            "open": round(float(row["Open"]), 2),
+            "high": round(float(row["High"]), 2),
+            "low": round(float(row["Low"]), 2),
+            "close": round(float(row["Close"]), 2),
             "volume": int(row["Volume"]),
-        }
-        for idx, row in recent_df.iterrows()
-    ]
-
-    # 🧠 GPT prompt setup
-    try:
-        sheet = get_sheet()
-        logs = get_recent_logs(sheet=sheet)
-    except Exception as e:
-        print(f"Error fetching logs: {e}")
-        logs = []
-
-    system_prompt = (
-        "You're a trading assistant analyzing SPY 1-minute candles. "
-        "Decide to BUY CALL, BUY PUT, or SKIP. Respond with JSON: "
-        "{\"action\": \"call\", \"confidence\": 76, \"reason\": \"...\"}"
-    )
-    user_prompt = (
-        f"Last 30m candles:\n{json.dumps(candles)}\n\n"
-        f"Recent logs:\n{json.dumps(logs)}\n\nWhat’s the decision?"
-    )
-
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.5,
-            max_tokens=500
-        )
-        reply = response.choices[0].message.content.strip()
-        print(f"🤖 GPT Reply:\n{reply}")
-
-        data = json.loads(reply)
-        action = data.get("action", "").lower()
-        confidence = int(data.get("confidence", 0))
-        reason = data.get("reason", "No reason provided.")
-
-        send_trade_alert(action, confidence, reason)
-        log_trade_decision({
-            "action": action,
-            "confidence": confidence,
-            "reason": reason,
-            "raw": reply
         })
 
-        return data
+    prompt = (
+        f"You are a financial trading assistant. Based on the last 30 minutes of SPY 1-minute candle data, "
+        f"recommend a CALL or PUT options trade. Also provide confidence (0-100) and a brief reason.\n\n"
+        f"Here is the last 30 minutes of 1-min SPY data:\n\n{json.dumps(candle_records)}\n\n"
+        f"Reply ONLY in JSON format with keys: action, confidence, reason."
+    )
+
+    try:
+        print("📡 Sending prompt to GPT...")
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=500,
+        )
+        reply = response.choices[0].message.content.strip()
+        print("🤖 GPT Reply:\n", reply)
+
+        decision_data = json.loads(reply)
+        action = decision_data.get("action", "").lower()
+        confidence = int(decision_data.get("confidence", 0))
+        reason = decision_data.get("reason", "")
+
+        strike_type = determine_strike_type(action)
+        decision_data["strike_type"] = strike_type
+        decision_data["expiration"] = "End of Day"
+
+        send_trade_alert(action, confidence, reason, strike_type)
+
+        return decision_data
 
     except Exception as e:
         print(f"❌ GPT decision error: {e}")
-        raise
+        return {"error": str(e)}
