@@ -5,6 +5,7 @@ from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
+
 def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPrinter Alert"):
     if not DISCORD_WEBHOOK_URL:
         print("❌ DISCORD_WEBHOOK_URL is not set.")
@@ -27,6 +28,7 @@ def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPri
     else:
         print("✅ Discord alert sent.")
 
+
 def send_trade_alert(action: str, confidence: int, reason: str, strike_type: str):
     color = 0x2ecc71 if action.lower() in ['call', 'put'] else 0xe74c3c
     message = (
@@ -38,16 +40,19 @@ def send_trade_alert(action: str, confidence: int, reason: str, strike_type: str
     )
     send_discord_alert(message, color, title="🤖 GPT Trade Decision")
 
+
 def send_trade_result_alert(symbol: str, pnl: float, win: bool):
     color = 0x2ecc71 if win else 0xe74c3c
     result_text = "✅ WIN" if win else "❌ LOSS"
     message = f"**Symbol**: `{symbol}`\n**PnL**: `{pnl:.2f}%`\n**Result**: {result_text}"
     send_discord_alert(message, color, title="📈 Trade Result")
 
+
 def send_threshold_change_alert(old: float, new: float):
     color = 0xf1c40f
     message = f"🔁 Dynamic confidence threshold changed from `{old}%` → `{new}%`"
     send_discord_alert(message, color, title="⚙️ Threshold Update")
+
 
 def send_daily_summary():
     try:
