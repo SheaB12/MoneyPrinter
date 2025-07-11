@@ -4,51 +4,41 @@ import json
 import pandas as pd
 from alerts import send_trade_alert
 from logger import get_sheet, get_recent_logs, log_trade_decision
-from indicators import compute_indicators  # Custom file
 from strike_logic import recommend_strike_type
-from options_flow import fetch_tradier_flow_signal  # Optional module
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def calculate_manual_score(df: pd.DataFrame) -> int:
-    score = 0
-
-    # Compute indicators
-    df = compute_indicators(df)
-    
-    last = df.iloc[-1]
-
-    if last['ema_9'] > last['ema_20']:
-        score += 15
-    if last['macd'] > last['macd_signal']:
-        score += 10
-    if last['rsi'] > 50:
-        score += 10
-    if last['vwap'] < last['Close']:
-        score += 5
-    if last['volume_surge']:
-        score += 10
-
-    return score
-
 def gpt_decision(df: pd.DataFrame) -> dict:
-    # 🧼 Flatten columns if needed
+    # 🧼 Flatten MultiIndex columns if needed
     if isinstance(df.columns[0], tuple):
         df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+
+    # 🧾 Normalize column names
     df.columns = [col.strip().capitalize() for col in df.columns]
 
+    # ✅ Ensure required columns exist
     required = ['Open', 'High', 'Low', 'Close', 'Volume']
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise KeyError(f"Missing required columns: {missing}")
 
+    # 🧹 Clean + Convert
     df = df.dropna(subset=required)
     if df.empty:
         raise ValueError("SPY data is empty after cleaning.")
     df = df.astype({col: 'float' for col in required})
 
-    # ⏳ Last 30m
+    # ⏳ Last 30 minutes
     recent_df = df.tail(30)
+
+    # 📈 Entry price = close of most recent candle
+    entry_price = round(recent_df.iloc[-1]['Close'], 2)
+
+    # 📊 Profit potential = high of day vs entry
+    high_of_day = round(df['High'].max(), 2)
+    profit_pct = round(((high_of_day - entry_price) / entry_price) * 100, 2)
+
+    # 🧱 Format candles
     candles = [
         {
             "time": idx.strftime("%H:%M"),
@@ -61,23 +51,22 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         for idx, row in recent_df.iterrows()
     ]
 
-    # 📊 Get logs for context
+    # 🧠 GPT prompt setup
     try:
         sheet = get_sheet()
         logs = get_recent_logs(sheet=sheet)
     except Exception as e:
-        print(f"⚠️ Error fetching logs: {e}")
+        print(f"Error fetching logs: {e}")
         logs = []
 
-    # 🧠 Prompt setup
     system_prompt = (
-        "You are an options trading assistant. Analyze the SPY 1-minute candles "
-        "and decide whether to BUY CALL, BUY PUT, or SKIP. Provide confidence (0–100) and a reason."
-        "Use this format: {\"action\": \"call\", \"confidence\": 76, \"reason\": \"...\"}"
+        "You're a trading assistant analyzing SPY 1-minute candles. "
+        "Decide to BUY CALL, BUY PUT, or SKIP. Respond with JSON: "
+        "{\"action\": \"call\", \"confidence\": 76, \"reason\": \"...\"}"
     )
     user_prompt = (
         f"Last 30m candles:\n{json.dumps(candles)}\n\n"
-        f"Recent performance logs:\n{json.dumps(logs)}\n\nWhat’s the best decision?"
+        f"Recent logs:\n{json.dumps(logs)}\n\nWhat’s the decision?"
     )
 
     try:
@@ -93,38 +82,38 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         reply = response.choices[0].message.content.strip()
         print(f"🤖 GPT Reply:\n{reply}")
 
-        gpt = json.loads(reply)
-        action = gpt.get("action", "").lower()
-        gpt_conf = int(gpt.get("confidence", 0))
-        reason = gpt.get("reason", "No reason provided.")
+        data = json.loads(reply)
+        action = data.get("action", "").lower()
+        confidence = int(data.get("confidence", 0))
+        reason = data.get("reason", "No reason provided.")
 
-        # 🧮 Manual score
-        manual_score = calculate_manual_score(df)
-        print(f"⚙️ Manual indicator score: {manual_score}")
+        # ➕ Strike logic
+        strike_type = recommend_strike_type(action, logs)
 
-        # 🧪 Options flow (if enabled)
-        flow_score = fetch_tradier_flow_signal() if os.getenv("USE_FLOW") == "true" else 0
+        # 📤 Send alert with estimated profit
+        send_trade_alert(
+            action=action,
+            confidence=confidence,
+            reason=reason,
+            strike_type=strike_type,
+            entry_price=entry_price,
+            high_of_day=high_of_day,
+            profit_pct=profit_pct
+        )
 
-        # 🧷 Composite confidence
-        composite_conf = int((gpt_conf + manual_score + flow_score) / 3)
-        strike_type = recommend_strike_type(action, composite_conf)
-
-        # ✅ Alert + Log
-        send_trade_alert(action, composite_conf, reason, strike_type)
+        # 🧾 Log decision
         log_trade_decision({
             "action": action,
-            "confidence": composite_conf,
+            "confidence": confidence,
             "reason": reason,
             "strike_type": strike_type,
+            "entry_price": entry_price,
+            "high_of_day": high_of_day,
+            "profit_pct": profit_pct,
             "raw": reply
         })
 
-        return {
-            "action": action,
-            "confidence": composite_conf,
-            "reason": reason,
-            "strike_type": strike_type
-        }
+        return data
 
     except Exception as e:
         print(f"❌ GPT decision error: {e}")
