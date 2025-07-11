@@ -2,7 +2,7 @@ import openai
 import os
 import json
 import pandas as pd
-from alerts import send_trade_alert
+from alerts import send_trade_alert, send_profit_alert
 from logger import get_sheet, get_recent_logs, log_trade_decision
 from strike_logic import recommend_strike_type
 
@@ -31,13 +31,6 @@ def gpt_decision(df: pd.DataFrame) -> dict:
     # ⏳ Last 30 minutes
     recent_df = df.tail(30)
 
-    # 📈 Entry price = close of most recent candle
-    entry_price = round(recent_df.iloc[-1]['Close'], 2)
-
-    # 📊 Profit potential = high of day vs entry
-    high_of_day = round(df['High'].max(), 2)
-    profit_pct = round(((high_of_day - entry_price) / entry_price) * 100, 2)
-
     # 🧱 Format candles
     candles = [
         {
@@ -51,7 +44,7 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         for idx, row in recent_df.iterrows()
     ]
 
-    # 🧠 GPT prompt setup
+    # 📊 Fetch logs
     try:
         sheet = get_sheet()
         logs = get_recent_logs(sheet=sheet)
@@ -59,11 +52,13 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         print(f"Error fetching logs: {e}")
         logs = []
 
+    # 🧠 GPT prompt setup
     system_prompt = (
         "You're a trading assistant analyzing SPY 1-minute candles. "
-        "Decide to BUY CALL, BUY PUT, or SKIP. Respond with JSON: "
+        "Decide to BUY CALL, BUY PUT, or SKIP. Respond in JSON: "
         "{\"action\": \"call\", \"confidence\": 76, \"reason\": \"...\"}"
     )
+
     user_prompt = (
         f"Last 30m candles:\n{json.dumps(candles)}\n\n"
         f"Recent logs:\n{json.dumps(logs)}\n\nWhat’s the decision?"
@@ -79,41 +74,47 @@ def gpt_decision(df: pd.DataFrame) -> dict:
             temperature=0.5,
             max_tokens=500
         )
+
         reply = response.choices[0].message.content.strip()
         print(f"🤖 GPT Reply:\n{reply}")
-
         data = json.loads(reply)
+
         action = data.get("action", "").lower()
-        confidence = int(data.get("confidence", 0))
+        confidence_raw = data.get("confidence", 0)
+        confidence = int(confidence_raw[0]) if isinstance(confidence_raw, list) else int(confidence_raw)
         reason = data.get("reason", "No reason provided.")
 
-        # ➕ Strike logic
-        strike_type = recommend_strike_type(action, logs)
+        # 🧠 Strike recommendation logic
+        strike_type = recommend_strike_type(df, action)
 
-        # 📤 Send alert with estimated profit
-        send_trade_alert(
-            action=action,
-            confidence=confidence,
-            reason=reason,
-            strike_type=strike_type,
-            entry_price=entry_price,
-            high_of_day=high_of_day,
-            profit_pct=profit_pct
-        )
+        # 🧮 Entry = last candle close, High = intraday high
+        entry_price = df["Close"].iloc[-1]
+        high_price = df["High"].max()
+        profit_pct = ((high_price - entry_price) / entry_price * 100) if action == "call" else ((entry_price - df["Low"].min()) / entry_price * 100)
+        profit_pct = round(profit_pct, 2)
+        win = profit_pct >= 0  # Simplified win logic for alert
 
-        # 🧾 Log decision
+        # 🚨 Alert
+        send_trade_alert(action, confidence, reason, strike_type)
+        send_profit_alert(profit_pct, win)
+
+        # 📓 Log
         log_trade_decision({
             "action": action,
             "confidence": confidence,
             "reason": reason,
             "strike_type": strike_type,
-            "entry_price": entry_price,
-            "high_of_day": high_of_day,
             "profit_pct": profit_pct,
             "raw": reply
         })
 
-        return data
+        return {
+            "action": action,
+            "confidence": confidence,
+            "reason": reason,
+            "strike_type": strike_type,
+            "profit_pct": profit_pct
+        }
 
     except Exception as e:
         print(f"❌ GPT decision error: {e}")
