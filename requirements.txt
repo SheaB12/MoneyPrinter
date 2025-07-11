@@ -10,3 +10,4 @@ oauth2client
 discord-webhook
 gspread-formatting
 polygon-api-client
+websocket-client
