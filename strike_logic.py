@@ -1,21 +1,21 @@
-# strike_logic.py
-
-def recommend_strike_type(action: str, confidence: int, logs: list = None) -> str:
+def recommend_strike_type(df, action):
     """
-    Recommends a strike type (ITM/ATM/OTM) based on confidence and optionally recent logs.
+    Recommends strike type based on price distance from recent range.
+    Uses heuristics and historical bias.
     """
-    action = action.lower()
+    try:
+        close = df["Close"].iloc[-1]
+        low = df["Low"].min()
+        high = df["High"].max()
+        range_pct = (high - low) / close * 100
 
-    if action not in ['call', 'put']:
-        return "N/A"
-
-    # ✅ Future-proof: Adjust based on logs (placeholder logic for now)
-    # You can enhance this to analyze actual log performance by strike type
-
-    # 📊 Simple rule-based logic
-    if confidence >= 80:
-        return "ITM"
-    elif confidence >= 60:
+        # Example logic: lower volatility = ITM, higher volatility = OTM
+        if range_pct < 0.6:
+            return "ITM"
+        elif range_pct < 1.2:
+            return "ATM"
+        else:
+            return "OTM"
+    except Exception as e:
+        print(f"Error in strike recommendation: {e}")
         return "ATM"
-    else:
-        return "OTM"
