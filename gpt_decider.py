@@ -2,7 +2,7 @@ import openai
 import os
 import json
 import pandas as pd
-from alerts import send_trade_alert, send_trade_profit
+from alerts import send_trade_alert
 from logger import get_sheet, get_recent_logs, log_trade_decision
 from strike_logic import recommend_strike_type
 
@@ -19,9 +19,9 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         raise KeyError(f"Missing required columns: {missing}")
 
     df = df.dropna(subset=required)
+    df = df.astype({col: 'float' for col in required})
     if df.empty:
         raise ValueError("SPY data is empty after cleaning.")
-    df = df.astype({col: 'float' for col in required})
 
     recent_df = df.tail(30)
 
@@ -71,35 +71,15 @@ def gpt_decision(df: pd.DataFrame) -> dict:
         action = data.get("action", "").lower()
         confidence = int(data.get("confidence", 0))
         reason = data.get("reason", "No reason provided.")
-        strike_type = recommend_strike_type(action, confidence)
 
-        # Send alert to Discord
+        strike_type = recommend_strike_type(df, action)
+
         send_trade_alert(action, confidence, reason, strike_type)
-
-        # Track real market movement for profit calc
-        entry_price = df.iloc[-1]["Close"]
-        high_of_day = df["High"].max()
-        low_of_day = df["Low"].min()
-
-        if action == "call":
-            pnl = ((high_of_day - entry_price) / entry_price) * 100
-            win = pnl >= 0
-        elif action == "put":
-            pnl = ((entry_price - low_of_day) / entry_price) * 100
-            win = pnl >= 0
-        else:
-            pnl = 0
-            win = False
-
-        send_trade_profit("SPY", pnl, win)
-
         log_trade_decision({
             "action": action,
             "confidence": confidence,
             "reason": reason,
             "strike_type": strike_type,
-            "pnl": round(pnl, 2),
-            "win": win,
             "raw": reply
         })
 
