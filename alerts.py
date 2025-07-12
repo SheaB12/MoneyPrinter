@@ -28,21 +28,15 @@ def send_discord_alert(message: str, color: int = 0x3498db, title="📊 MoneyPri
         print("✅ Discord alert sent.")
 
 def send_trade_alert(action: str, confidence: int, reason: str, strike_type: str):
-    color = 0x2ecc71 if action.lower() in ['call', 'put'] else 0xe74c3c
+    color = 0x2ecc71 if action in ['call', 'put'] else 0xe74c3c
     message = (
         f"**Action**: `{action.upper()}`\n"
         f"**Confidence**: `{confidence}%`\n"
-        f"**Reason**: {reason}\n"
         f"**Strike Type**: `{strike_type}`\n"
-        f"**Expiration**: `End of Day`"
+        f"**Expiration**: `End of Day`\n"
+        f"**Reason**: {reason}"
     )
     send_discord_alert(message, color, title="🤖 GPT Trade Decision")
-
-def send_trade_profit(symbol: str, pnl: float, win: bool):
-    color = 0x2ecc71 if win else 0xe74c3c
-    result_text = "✅ WIN" if win else "❌ LOSS"
-    message = f"**Symbol**: `{symbol}`\n**PnL**: `{pnl:.2f}%`\n**Result**: {result_text}"
-    send_discord_alert(message, color, title="📈 Trade Profit Estimate")
 
 def send_threshold_change_alert(old: float, new: float):
     color = 0xf1c40f
@@ -55,7 +49,6 @@ def send_daily_summary():
         if not summary:
             print("⚠️ No daily summary available to send.")
             return
-
         send_discord_alert(summary, color=0x7289DA, title="📅 Daily Performance Summary")
     except Exception as e:
         print(f"❌ Error sending daily summary: {e}")
